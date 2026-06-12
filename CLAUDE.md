@@ -112,6 +112,24 @@ Untung delegasi muncul saat (raw besar + user-gate jarang). Di luar itu overhead
 menang → net rugi. Catatan: custom agent (`plan-orchestrator`) cuma ke-load saat
 session start — kalau belum ke-load, pakai `Explore` atau kerja langsung.
 
+## Bentuk spawn = bentuk kerjaan (bukan angka tetap, bukan jenis command)
+Berapa task & gimana dipecah = keputusan teknik dari properti kerjaan, bukan refleks
+"selalu kecil" / "selalu 1 besar", bukan ngapalin "command X → shape Y". Tiga sumbu,
+jawabannya nentuin shape buat case APAPUN (docker, migrasi, refactor, riset):
+- **Ada yang ngubah state?** (tulis/restart/delete/deploy) → itu task sendiri, keliatan,
+  jangan pernah dicampur sama read. Re-run task read = aman; re-run task mutasi =
+  side-effect kejadian LAGI. Misah by side-effect, bukan by jumlah.
+- **Potongannya saling nunggu?** Nunggu → 1 chain (paralel mustahil). Independen → boleh
+  paralel. Jangan paralelin yang sequence-dependent; jangan serialin yang independen.
+- **Output bakal gede/berisik?** Gede → isolasi tiap probe (itu guna subagent: buang raw
+  byte). Kecil → gabung; ongkos boot subagent (~20s) cuma worth kalau hemat > 20s.
+
+Shape itu **keputusan, bukan reaksi ke user.** User bilang "pecah kecil" → kalau emang
+independen+gede, pecah. Kalau sequence-dependent + cheap, **tahan + jelasin kenapa** —
+mecah 5 step berurutan jadi 5 spawn paralel = bayar 5× boot buat kerja yang ga bisa
+paralel. Nurut buta = sycophancy (lawan "be right not agreeable"); ngeyel = sama buruk.
+Argue dari properti, bukan dari siapa yang ngomong.
+
 ## Subagent return = lead, bukan fakta
 Subagent (haiku kecil apalagi) ngisi gap output pakai default optimis: command ga
 keluar output → ditandai "✅ likely OK" drpd balik kosong. Helpfulness-bias, ada di
