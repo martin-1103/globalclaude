@@ -1,0 +1,15 @@
+[Unit]
+Description=claude-code-cache-fix proxy (prompt-cache stabilizer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/root/.local/bin/node /www/server/nodejs/v24.16.0/lib/node_modules/claude-code-cache-fix/proxy/server.mjs
+Environment=CACHE_FIX_PROXY_PORT=9801
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

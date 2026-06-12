@@ -67,6 +67,15 @@ if ! command -v codebase-memory-mcp >/dev/null; then
   warn "codebase-memory-mcp not found. Install: npm i -g codebase-memory-mcp  (expected at /root/.local/bin or hermes node bin)"
 fi
 
+# claude-code-cache-fix — prompt-cache proxy (prevents up to 20x cost on resumed sessions)
+if ! systemctl is-active --quiet cache-fix-proxy 2>/dev/null; then
+  warn "cache-fix-proxy not active. Strongly recommended — see cache-fix/README.md"
+  warn "  npm i -g claude-code-cache-fix"
+  warn "  cp $REPO_DIR/cache-fix/cache-fix-proxy.service /etc/systemd/system/"
+  warn "  systemctl daemon-reload && systemctl enable --now cache-fix-proxy"
+  warn "  echo 'export ANTHROPIC_BASE_URL=\"http://127.0.0.1:9801\"' >> ~/.bashrc"
+fi
+
 # ---------------------------------------------------------------------------
 # 4. Plugins — add marketplaces + install
 # ---------------------------------------------------------------------------

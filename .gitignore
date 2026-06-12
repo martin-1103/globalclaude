@@ -2,6 +2,8 @@
 .credentials.json
 .claude.json
 auth.json
+.bashrc
+.profile
 *.env
 .env
 
