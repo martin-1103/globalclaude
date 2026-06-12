@@ -89,7 +89,7 @@ or the referenced hooks will error:
 | **ast-grep**          | haiku-explorer (structural search) | `npm i -g @ast-grep/cli` / `cargo install ast-grep` — [ast-grep.github.io](https://ast-grep.github.io) |
 | **tokei**             | haiku-explorer (LoC)           | `cargo install tokei`                         |
 | **aid** (AI Distiller)| haiku-explorer (code distill)  | [github.com/janreges/ai-distiller](https://github.com/janreges/ai-distiller) (binary) |
-| **tavily**            | tavily-* skills                | `uv tool install tavily-cli`                  |
+| **tvly** (Tavily CLI) | tavily-* skills                | [github.com/tavily-ai/tavily-cli](https://github.com/tavily-ai/tavily-cli) — `curl -fsSL https://cli.tavily.com/install.sh \| bash`, then `tvly login` (needs API key) |
 | **rtk**               | `PreToolUse` Bash hook         | [github.com/rtk-ai/rtk](https://github.com/rtk-ai/rtk) — `brew install rtk` then `rtk init -g` |
 | **codebase-memory-mcp** | `.mcp.json`                  | [github.com/DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — `npm i -g codebase-memory-mcp` |
 | **claude-code-cache-fix** | prompt-cache proxy (port 9801) | `npm i -g claude-code-cache-fix` + systemd — see [`cache-fix/`](cache-fix/) |

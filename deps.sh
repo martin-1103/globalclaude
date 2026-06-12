@@ -50,12 +50,21 @@ if ! have aid; then
   warn "  https://github.com/janreges/ai-distiller/releases  (linux-$ARCH, chmod +x, mv -> /usr/local/bin/aid)"
 fi
 
-# --- tavily CLI (web search/extract skills) -------------------------------
-if ! have tavily; then
-  if have uv;   then log "uv tool install tavily-cli"; uv tool install tavily-cli || warn "tavily via uv failed"
-  elif have pip3; then log "pip install tavily-cli"; pip3 install --user tavily-cli || warn "tavily via pip failed"
-  else warn "tavily: need uv or pip. uv tool install tavily-cli"
+# --- tavily CLI (binary is `tvly`; powers all tavily-* skills) -------------
+# Repo: https://github.com/tavily-ai/tavily-cli  (skills: tavily-ai/skills)
+if ! have tvly; then
+  if have curl; then
+    log "Installing tavily CLI (tvly) via official installer"
+    curl -fsSL https://cli.tavily.com/install.sh | bash || warn "tvly installer failed"
+  elif have uv;   then log "uv tool install tavily-cli"; uv tool install tavily-cli || warn "tvly via uv failed"
+  elif have pip3; then log "pip install tavily-cli"; pip3 install --user tavily-cli || warn "tvly via pip failed"
+  else warn "tvly: need curl/uv/pip — https://github.com/tavily-ai/tavily-cli"
   fi
+fi
+# Auth (cannot auto-do — needs the user's key):
+if have tvly && ! tvly whoami >/dev/null 2>&1 && [ -z "${TAVILY_API_KEY:-}" ]; then
+  warn "tvly installed but NOT authenticated. Get a key at https://tavily.com then:"
+  warn "  tvly login --api-key tvly-YOUR_KEY    (or: export TAVILY_API_KEY=tvly-...)"
 fi
 
 # --- codebase-memory-mcp (.mcp.json) --------------------------------------
@@ -88,7 +97,7 @@ fi
 # --- Report ----------------------------------------------------------------
 echo ""
 log "Final tool status:"
-for t in rg fdfind jq ast-grep tokei aid tavily codebase-memory-mcp rtk node npm; do
+for t in rg fdfind jq ast-grep tokei aid tvly codebase-memory-mcp rtk node npm; do
   if have "$t"; then printf '  \033[32m✓\033[0m %s\n' "$t"; else printf '  \033[31m✗\033[0m %s  (missing)\n' "$t"; fi
 done
 echo ""
