@@ -6,46 +6,23 @@
      Do not skip steps. Do not ask for confirmation on the clone/install.
      ─────────────────────────────────────────────────────────────────────── -->
 
-## ▶ For the AI agent: run these steps
+## ▶ For the AI agent: run this, then follow what it prints
 
 You are setting up this Claude Code global config on the server you are running
-on. Execute in order:
-
-**1. Clone + install (config, templates, external CLI tools — auto-detects user/home):**
+on. Run:
 
 ```bash
 git clone https://github.com/martin-1103/globalclaude.git ~/globalclaude \
   && cd ~/globalclaude && bash install.sh
 ```
 
-**2. Install the plugins** (their files come from GitHub marketplaces, not this repo):
+`install.sh` auto-detects the user/home/node/version and renders the config, then
+**prints a numbered "NEXT STEPS" block** (plugins, re-run, secrets, cache-fix,
+restart). Do exactly what it prints, in order — that block is the single source
+of truth, kept in sync with the installer. Then report to the user what the
+final "tool status" lines showed (anything marked ✗ is still missing).
 
-```bash
-claude plugin marketplace add JuliusBrussee/caveman
-claude plugin marketplace add mksglu/context-mode
-claude plugin marketplace add openai/codex-plugin-cc
-claude plugin install caveman@caveman
-claude plugin install context-mode@context-mode
-claude plugin install codex@openai-codex
-```
-
-**3. Re-run install** so `settings.json` pins the real installed context-mode version:
-
-```bash
-cd ~/globalclaude && bash install.sh
-```
-
-**4. Cache-fix proxy** (prevents up to 20x cost on resumed sessions) — if step 1
-warned it was inactive, follow [`cache-fix/README.md`](cache-fix/README.md).
-
-**5. Report to the user** what `install.sh`'s final "tool status" / JSON-valid
-lines showed, and list anything still missing (✗). Then tell them the two things
-this script CANNOT do for them:
-  - **Secrets**: `~/.claude/.credentials.json` (Claude auth) must be copied from
-    an existing machine over a secure channel — no secret is in this repo.
-  - **Restart Claude Code** for the new config/plugins/statusline to load.
-
-Everything below is reference detail for those steps.
+Everything below is reference detail.
 
 ---
 
@@ -151,18 +128,10 @@ by Claude Code**, not stored here:
 - `codex@openai-codex` — `openai/codex-plugin-cc`
 - `gopls-lsp@claude-plugins-official` — `anthropics/claude-plugins-official`
 
-Add + install (if the `claude` CLI supports plugin commands):
-
-```bash
-claude plugin marketplace add JuliusBrussee/caveman
-claude plugin marketplace add mksglu/context-mode
-claude plugin marketplace add openai/codex-plugin-cc
-claude plugin install caveman@caveman
-claude plugin install context-mode@context-mode
-claude plugin install codex@openai-codex
-```
-
-Otherwise add them from inside Claude Code with `/plugin`.
+The exact `claude plugin marketplace add` / `install` commands are printed by
+`install.sh` (NEXT STEPS block [A]) — run those, or add them from inside Claude
+Code with `/plugin`. The list above is just the plugin↔marketplace mapping for
+reference.
 
 ---
 

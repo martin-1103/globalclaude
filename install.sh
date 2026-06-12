@@ -131,17 +131,35 @@ if ! (command -v systemctl >/dev/null && systemctl is-active --quiet cache-fix-p
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Plugins
+# 7. Next steps — THE single source of truth for what to do after this script.
+#    README only points here; do not duplicate these steps elsewhere.
 # ---------------------------------------------------------------------------
-log "Plugins to install (via Claude Code /plugin or CLI):"
 cat <<'EOF'
-    claude plugin marketplace add JuliusBrussee/caveman
-    claude plugin marketplace add mksglu/context-mode
-    claude plugin marketplace add openai/codex-plugin-cc
-    claude plugin install caveman@caveman
-    claude plugin install context-mode@context-mode
-    claude plugin install codex@openai-codex
-EOF
-warn "After installing context-mode, RE-RUN this script so settings.json pins the real version."
 
-log "Done. Restart Claude Code. Verify: caveman banner, statusline, /plugin list."
+============================================================
+ NEXT STEPS (this script cannot do these automatically)
+============================================================
+
+[A] Install plugins (files come from GitHub marketplaces, not the repo):
+      claude plugin marketplace add JuliusBrussee/caveman
+      claude plugin marketplace add mksglu/context-mode
+      claude plugin marketplace add openai/codex-plugin-cc
+      claude plugin install caveman@caveman
+      claude plugin install context-mode@context-mode
+      claude plugin install codex@openai-codex
+
+[B] RE-RUN this script — pins the real installed context-mode version
+    into settings.json (otherwise hooks fail "file not found"):
+      cd "$(pwd)" && bash install.sh
+
+[C] Secrets (NOT in this repo — copy from an existing machine):
+      ~/.claude/.credentials.json   # Claude auth — required to log in
+    e.g.  scp old-host:~/.claude/.credentials.json ~/.claude/
+
+[D] Cache-fix proxy (if warned inactive above): see cache-fix/README.md
+
+[E] Restart Claude Code. Verify: caveman banner, statusline, /plugin list.
+============================================================
+EOF
+
+log "install.sh finished."
