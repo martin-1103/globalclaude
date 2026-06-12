@@ -25,18 +25,25 @@ every `claude` invocation routes through it.
 # 1. Install the npm package globally (provides cache-fix-proxy binary + proxy/server.mjs)
 npm install -g claude-code-cache-fix
 
-# 2. Install + enable the systemd service
-cp cache-fix-proxy.service /etc/systemd/system/cache-fix-proxy.service
+# 2. Render the systemd unit with this machine's node + npm paths
+NODE_BIN="$(command -v node)"
+NPM_ROOT="$(npm root -g)"
+sed -e "s#__NODE_BIN__#$NODE_BIN#g" -e "s#__NPM_ROOT__#$NPM_ROOT#g" \
+    cache-fix-proxy.service.template > /etc/systemd/system/cache-fix-proxy.service
+
+# 3. Enable + start
 systemctl daemon-reload
 systemctl enable --now cache-fix-proxy
 
-# 3. Route claude through the proxy (append to ~/.bashrc)
+# 4. Route claude through the proxy (append to ~/.bashrc)
 echo 'export ANTHROPIC_BASE_URL="http://127.0.0.1:9801"' >> ~/.bashrc
 ```
 
-> The service file pins the node path
-> `/www/server/nodejs/v24.16.0/lib/node_modules/...`. If npm installs elsewhere,
-> fix `ExecStart` to match `npm root -g`.
+> The unit ships as `.service.template` with `__NODE_BIN__` / `__NPM_ROOT__`
+> placeholders so it works regardless of where node/npm live. `install.sh`
+> renders it automatically; the steps above are the manual path. Service runs as
+> root (systemd system unit). For a non-root user, use a systemd **user** unit
+> (`systemctl --user`) and drop the `User=root` line.
 
 ## Verify
 

@@ -82,10 +82,14 @@ Quick version:
 
 ```bash
 npm install -g claude-code-cache-fix
-cp cache-fix/cache-fix-proxy.service /etc/systemd/system/
+# render unit with detected node/npm paths, then enable
+sed -e "s#__NODE_BIN__#$(command -v node)#g" -e "s#__NPM_ROOT__#$(npm root -g)#g" \
+    cache-fix/cache-fix-proxy.service.template > /etc/systemd/system/cache-fix-proxy.service
 systemctl daemon-reload && systemctl enable --now cache-fix-proxy
 echo 'export ANTHROPIC_BASE_URL="http://127.0.0.1:9801"' >> ~/.bashrc
 ```
+
+(`install.sh` does this rendering for you — manual steps shown for reference.)
 
 ### Plugins
 
