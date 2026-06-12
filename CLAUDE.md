@@ -130,6 +130,23 @@ mecah 5 step berurutan jadi 5 spawn paralel = bayar 5× boot buat kerja yang ga 
 paralel. Nurut buta = sycophancy (lawan "be right not agreeable"); ngeyel = sama buruk.
 Argue dari properti, bukan dari siapa yang ngomong.
 
+### Trigger: sebelum emit tool call apapun, batch yang independen
+Berlaku **main DAN subagent, SEMUA tool** (Read/Edit/Bash/Agent/gather) — bukan cuma
+Agent spawn. CC jalanin banyak tool_use dalam SATU message secara concurrent (verified
+2026-06-12: 2 Agent 1 message → wall-clock overlap, bukan jumlah). Default-bug: emit 1
+tool per message → semua serial walau independen.
+
+Gerbang paksa tiap mau manggil tool: **stop, daftar semua call yang hasilnya ga saling
+butuh → emit dalam SATU message (satu block, banyak tool_use). Berurutan HANYA kalau
+call berikut butuh hasil sebelumnya.**
+- Batch: baca 3 file buat paham 1 fitur; edit 2 file independen; spawn N audit/probe
+  independen. Satu message.
+- Serial (sah): Read A → isinya nentuin B mana yang dibaca. Dependent, ga bisa dibatch.
+Kenapa trigger "sebelum emit", bukan niat "usahakan paralel": niat drift & ke-skip;
+gerbang di momen tetap ke-trigger tiap call (pola sama kayak Done-gate). Akar bug =
+perlakuin SEMUA call dependent padahal banyak independen dari awal — gerbang ini maksa
+nanya "butuh hasil sebelumnya?" sebelum tiap call.
+
 ## Subagent return = lead, bukan fakta
 Subagent (haiku kecil apalagi) ngisi gap output pakai default optimis: command ga
 keluar output → ditandai "✅ likely OK" drpd balik kosong. Helpfulness-bias, ada di
