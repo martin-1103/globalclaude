@@ -104,10 +104,14 @@ log "Rendering .mcp.json"
 render "$REPO_DIR/.mcp.json.template" "$CLAUDE_DIR/.mcp.json"
 
 # ---------------------------------------------------------------------------
-# 5. External tools — warn if missing
+# 5. External CLI tools (rg, ast-grep, aid, tavily, rtk, codebase-memory-mcp...)
 # ---------------------------------------------------------------------------
-command -v rtk >/dev/null || warn "rtk not installed — remove its PreToolUse hook from settings.json or install it."
-command -v codebase-memory-mcp >/dev/null || warn "codebase-memory-mcp not found — npm i -g codebase-memory-mcp"
+if [ "${SKIP_DEPS:-0}" = "1" ]; then
+  warn "SKIP_DEPS=1 — skipping external tool install (deps.sh)"
+else
+  log "Installing external CLI tools (deps.sh)"
+  bash "$REPO_DIR/deps.sh" || warn "deps.sh reported failures — review output above"
+fi
 
 # ---------------------------------------------------------------------------
 # 6. Cache-fix proxy (prompt-cache stabilizer) — render service with detected paths

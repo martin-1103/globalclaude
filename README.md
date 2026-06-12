@@ -64,13 +64,26 @@ The installer validates the rendered `settings.json` as JSON before trusting it.
 `settings.json` references tools that live outside `~/.claude`. Install these
 or the referenced hooks will error:
 
-| Tool                  | Used by                        | Install hint                                  |
+`install.sh` runs [`deps.sh`](deps.sh) automatically. Set `SKIP_DEPS=1` to skip.
+
+| Tool                  | Used by                        | Source / install                              |
 |-----------------------|--------------------------------|-----------------------------------------------|
-| **node**              | all hooks + cache-fix service  | Any Node.js on PATH (`command -v node`)       |
-| **rtk**               | `PreToolUse` Bash hook (`rtk hook claude`) | Rust binary -> `~/.local/bin/rtk`         |
-| **codebase-memory-mcp** | `.mcp.json`                  | `npm i -g codebase-memory-mcp` -> `~/.local/bin/` |
-| **claude-code-cache-fix** | prompt-cache proxy (port 9801) | `npm i -g claude-code-cache-fix` + systemd service — see [`cache-fix/`](cache-fix/) |
+| **node**              | all hooks + cache-fix service  | Any Node.js on PATH                           |
+| **ripgrep** (`rg`)    | haiku-explorer, statusline     | `apt install ripgrep`                         |
+| **fd-find** (`fdfind`)| haiku-explorer                 | `apt install fd-find`                         |
+| **jq**                | statusline                     | `apt install jq`                             |
+| **ast-grep**          | haiku-explorer (structural search) | `npm i -g @ast-grep/cli` / `cargo install ast-grep` — [ast-grep.github.io](https://ast-grep.github.io) |
+| **tokei**             | haiku-explorer (LoC)           | `cargo install tokei`                         |
+| **aid** (AI Distiller)| haiku-explorer (code distill)  | [github.com/janreges/ai-distiller](https://github.com/janreges/ai-distiller) (binary) |
+| **tavily**            | tavily-* skills                | `uv tool install tavily-cli`                  |
+| **rtk**               | `PreToolUse` Bash hook         | [github.com/rtk-ai/rtk](https://github.com/rtk-ai/rtk) — `brew install rtk` then `rtk init -g` |
+| **codebase-memory-mcp** | `.mcp.json`                  | [github.com/DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — `npm i -g codebase-memory-mcp` |
+| **claude-code-cache-fix** | prompt-cache proxy (port 9801) | `npm i -g claude-code-cache-fix` + systemd — see [`cache-fix/`](cache-fix/) |
 | **Plugins**           | `enabledPlugins` in settings   | Install via marketplace (see below)           |
+
+> ⚠️ **rtk name collision**: `cargo install rtk` / `npm i rtk` installs a
+> *different* tool (Rust Type Kit). Use the official rtk-ai installer or brew.
+> `deps.sh` handles this correctly.
 
 ### Prompt-cache proxy (important — saves cost)
 
