@@ -112,6 +112,11 @@ Each iteration:
    confirm RED→GREEN. If it fails, hand the failure back to the same editor to fix (or
    escalate sonnet→opus); don't move on with a red item. A green build that doesn't exercise
    the change is NOT a pass.
+   - **Editor returned `BLOCKED_NEEDS_SCOPE`** (needs to cross its `files` boundary or change
+     a shared signature/contract): this is NOT a verify failure — do NOT re-spawn the same
+     editor (it will block again). The item stays `pending`. This is a **plan gap**: STOP the
+     wave, carry the editor's proposal (change + affected callers/files) back to `/fix-plan`
+     or `/impl-plan` to re-scope the task. Don't redesign or widen the boundary here.
 5. **Write status back (race-safe).** ONLY after an item's verify passes, the MAIN agent
    marks it `completed` in the file. The main agent is a **single** agent processing editor
    returns one after another — it is the ONLY writer of this file, so writes are already
