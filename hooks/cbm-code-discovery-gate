@@ -3,7 +3,8 @@
 # NOTE: the legacy filename is kept for zero-migration upgrades.
 # Despite the name this NEVER blocks a tool call - it only adds
 # graph context. Any failure is silent (exit 0, no output).
-BIN="/root/.local/bin/codebase-memory-mcp"
+# Resolve binary: PATH first, then $HOME/.local/bin fallback.
+BIN="$(command -v codebase-memory-mcp 2>/dev/null || echo "$HOME/.local/bin/codebase-memory-mcp")"
 [ -x "$BIN" ] || exit 0
 "$BIN" hook-augment 2>/dev/null
 exit 0

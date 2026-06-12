@@ -1,7 +1,9 @@
 # globalclaude
 
 Portable Claude Code config — agents, skills, hooks, `settings.json`, `CLAUDE.md`.
-Designed to bootstrap a **fresh server with an identical layout** (user `root`, home `/root`).
+Bootstraps a fresh server **for any user**. `install.sh` auto-detects the current
+user, home directory, node/Hermes paths, npm root, and the installed context-mode
+plugin version, then renders the config from templates — no hardcoded `/root`.
 
 > ⚠️ This repo intentionally contains **NO secrets**. Credentials
 > (`.credentials.json`, `.claude.json`, `auth.json`) are gitignored and must be
@@ -12,29 +14,48 @@ Designed to bootstrap a **fresh server with an identical layout** (user `root`, 
 ## Quick start (for an AI agent on the target server)
 
 ```bash
-git clone https://github.com/martin-1103/globalclaude.git /root/globalclaude
-cd /root/globalclaude
+git clone https://github.com/martin-1103/globalclaude.git ~/globalclaude
+cd ~/globalclaude
 bash install.sh
 ```
 
-Then restart Claude Code and run the verification steps below.
+Then restart Claude Code and run the verification steps below. Works as root
+(`~` = `/root`) or any other user (`~` = `/home/<user>`).
 
 ---
 
 ## What gets installed where
 
+All `~` below resolve to the installing user's home (`/root`, `/home/deploy`, …).
+
 | Repo path           | Installs to                | Purpose                                  |
 |---------------------|----------------------------|------------------------------------------|
-| `agents/`           | `/root/.claude/agents/`    | Subagents (haiku-*, sonnet-editor, etc.) |
-| `skills/`           | `/root/.claude/skills/`    | Skills (investigate, fix-plan, tavily-*) |
-| `hooks/`            | `/root/.claude/hooks/`     | Session/tool hooks (cbm-*, cache-heal)   |
-| `cproxy-hooks/`     | `/root/.cproxy/hooks/`     | Caveman mode hooks (referenced by settings) |
-| `CLAUDE.md`         | `/root/.claude/CLAUDE.md`  | Global instructions (Bahasa Indonesia, ops rules) |
-| `RTK.md`            | `/root/.claude/RTK.md`     | RTK token-killer reference               |
-| `settings.json`     | `/root/.claude/settings.json` | Hooks, plugins, statusline, model     |
-| `.mcp.json`         | `/root/.claude/.mcp.json`  | MCP servers (codebase-memory-mcp)        |
-| `statusline.sh`     | `/root/.claude/statusline.sh` | Custom statusline                     |
+| `agents/`           | `~/.claude/agents/`        | Subagents (haiku-*, sonnet-editor, etc.) |
+| `skills/`           | `~/.claude/skills/`        | Skills (investigate, fix-plan, tavily-*) |
+| `hooks/`            | `~/.claude/hooks/`         | Session/tool hooks (cbm-*, cache-heal)   |
+| `cproxy-hooks/`     | `~/.cproxy/hooks/`         | Caveman mode hooks (referenced by settings) |
+| `CLAUDE.md`         | `~/.claude/CLAUDE.md`      | Global instructions (Bahasa Indonesia, ops rules) |
+| `RTK.md`            | `~/.claude/RTK.md`         | RTK token-killer reference               |
+| `settings.json.template` | `~/.claude/settings.json` | Rendered with detected paths/version |
+| `.mcp.json.template`| `~/.claude/.mcp.json`      | Rendered: codebase-memory-mcp path       |
+| `statusline.sh`     | `~/.claude/statusline.sh`  | Custom statusline                        |
 | `cache-fix/`        | systemd + npm global       | Prompt-cache proxy (see below)           |
+
+### Templates & placeholders
+
+`settings.json` and `.mcp.json` ship as `.template` files (the literal versions
+are intentionally NOT committed — one source of truth). `install.sh` substitutes:
+
+| Placeholder       | Resolved from                                  |
+|-------------------|------------------------------------------------|
+| `__CLAUDE__`      | `$HOME/.claude`                                |
+| `__CPROXY__`      | `$HOME/.cproxy`                                |
+| `__LOCALBIN__`    | `$HOME/.local/bin`                             |
+| `__NODE_BIN__`    | `command -v node`                              |
+| `__NPM_ROOT__`    | `npm root -g` (cache-fix service only)         |
+| `__CTX_VER__`     | installed context-mode version (auto-detected) |
+
+The installer validates the rendered `settings.json` as JSON before trusting it.
 
 ---
 
@@ -45,9 +66,9 @@ or the referenced hooks will error:
 
 | Tool                  | Used by                        | Install hint                                  |
 |-----------------------|--------------------------------|-----------------------------------------------|
-| **Hermes node**       | caveman hooks (`/root/.hermes/node/bin/node`) | Provided by the Hermes runtime. Must exist at that path. |
-| **rtk**               | `PreToolUse` Bash hook (`rtk hook claude`) | Rust binary -> `/root/.local/bin/rtk`     |
-| **codebase-memory-mcp** | `.mcp.json`                  | `npm i -g codebase-memory-mcp` -> `/root/.local/bin/` |
+| **node**              | all hooks + cache-fix service  | Any Node.js on PATH (`command -v node`)       |
+| **rtk**               | `PreToolUse` Bash hook (`rtk hook claude`) | Rust binary -> `~/.local/bin/rtk`         |
+| **codebase-memory-mcp** | `.mcp.json`                  | `npm i -g codebase-memory-mcp` -> `~/.local/bin/` |
 | **claude-code-cache-fix** | prompt-cache proxy (port 9801) | `npm i -g claude-code-cache-fix` + systemd service — see [`cache-fix/`](cache-fix/) |
 | **Plugins**           | `enabledPlugins` in settings   | Install via marketplace (see below)           |
 
@@ -97,7 +118,7 @@ Otherwise add them from inside Claude Code with `/plugin`.
 paths, e.g.:
 
 ```
-/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/sessionstart.mjs
+~/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/sessionstart.mjs
 ```
 
 After installing context-mode, the actual installed version may differ. If
@@ -112,9 +133,8 @@ to match the directory under `plugins/cache/context-mode/context-mode/`.
 
 These are **gitignored** and must be placed on each machine by hand:
 
-- `/root/.claude/.credentials.json` — Claude auth token
-- `/root/.claude/.claude.json` — account/session state
-- `/root/.hermes/auth.json`, `/root/.hermes/.env` — Hermes credentials
+- `~/.claude/.credentials.json` — Claude auth token
+- `~/.claude/.claude.json` — account/session state
 
 Copy them over a secure channel (scp/secrets manager). Never commit them.
 
@@ -130,7 +150,7 @@ Copy them over a secure channel (scp/secrets manager). Never commit them.
 
 ```bash
 # 1. Config in place
-ls /root/.claude/{agents,skills,hooks} /root/.claude/settings.json
+ls ~/.claude/{agents,skills,hooks} ~/.claude/settings.json
 
 # 2. External tools
 which rtk codebase-memory-mcp node
@@ -153,10 +173,12 @@ curl -s http://127.0.0.1:9801/health           # -> {"status":"ok"}
 When you tweak config on the source machine and want to push changes:
 
 ```bash
-cd /root/globalclaude
-cp -r /root/.claude/{agents,skills,hooks} .
-cp -r /root/.cproxy/hooks/. cproxy-hooks/
-cp /root/.claude/{CLAUDE.md,RTK.md,settings.json,.mcp.json,statusline.sh} .
+cd ~/globalclaude
+cp -r ~/.claude/{agents,skills,hooks} .
+cp -r ~/.cproxy/hooks/. cproxy-hooks/
+cp ~/.claude/{CLAUDE.md,RTK.md,statusline.sh} .
+# settings.json / .mcp.json: edit the .template files by hand if their
+# structure changed — do NOT copy the rendered (path-substituted) versions back.
 git add -A && git commit -m "sync config" && git push
 ```
 
