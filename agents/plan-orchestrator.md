@@ -75,6 +75,13 @@ If the spawn prompt asked you to also write a machine handoff (e.g. fix-plan/imp
 Phase 5 → `project-docs/plans/<slug>.tasks.json`), write that file too, as the exact schema
 the prompt gives, and return its path. You CAN write files; you CANNOT seed native tasks.
 
+**Write your own artifacts directly — never spawn an editor for them.** The scratch file,
+the plan markdown, and `<slug>.tasks.json` are YOUR outputs: use your own `Write` tool on
+them. Do NOT spawn `sonnet-editor`/`opus-coder` to write a plan/scratch/tasks.json — those
+editors are for PRODUCT CODE only. `project-docs/` is exempt from the main-edit guard, so
+your direct `Write` goes through; routing it through an editor just adds a nested layer that
+the guard can misread and bounce. One writer (you), one tool (`Write`), for every artifact.
+
 ## Blocker protocol — you cannot ask the user
 
 You have no way to ask the user (the `AskUserQuestion` tool is main-only). When you hit a
