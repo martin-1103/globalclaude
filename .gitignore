@@ -1,0 +1,27 @@
+# Secrets & credentials — NEVER commit
+.credentials.json
+.claude.json
+auth.json
+*.env
+.env
+
+# Session data / transcripts
+history.jsonl
+projects/
+sessions/
+session-env/
+shell-snapshots/
+
+# Caches & generated
+cache/
+cache-fix-state/
+paste-cache/
+backups/
+file-history/
+quota-status/
+tasks/
+*.tar.gz
+*.zip
+*.bak
+*.last-cleanup
+node_modules/

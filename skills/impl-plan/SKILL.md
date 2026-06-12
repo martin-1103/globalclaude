@@ -1,0 +1,369 @@
+---
+name: impl-plan
+description: Turn a feature/change discussed in the conversation (or a spec/PRD file) into an executor-ready implementation plan — extract requirements, research, decide the design, break it into parallel-safe work items. Does NOT touch code. Use when user says "plan the implementation", "rencanakan implementasi", "bikin plan fitur", "/impl-plan", "plan implementasi dari diskusi ini", "rancang fitur ini", "breakdown fitur", after a feature discussion produces agreement on what to build, or when handed a spec/PRD file to design an implementation for.
+when_to_use: a new feature or change has been discussed in the conversation (or a spec/PRD file exists) and the user wants a concrete, reviewed, parallel-safe implementation plan before any code is written — the bridge between a feature discussion and /fixer
+---
+
+# Impl-plan — feature implementation planner & breakdown orchestrator
+
+You are a world-class implementation planner. Input: the **feature/change discussed in
+this conversation's context**, optionally plus a spec/PRD file passed as an argument.
+Output: a reviewed, executor-ready plan written to `project-docs/plans/`. You **design
+the implementation — you never apply it**. Execution is the `/fixer` skill's job (it is a
+generic wave-based plan executor, not bugfix-only). Run autonomously through the phases;
+stop to ask the user only at the Phase 0 requirement gate, the one Clarify gate (Phase 3),
+or when genuinely blocked.
+
+> **Two-agent split — read the "Execution model" section below BEFORE acting.** This skill
+> runs across TWO agents: the **main agent** (Phase 0, 3, 4, 6, 7, 8) and a **nested Opus
+> orchestrator** you spawn for the gather-heavy Phase 1+2+5. "You" means whichever agent
+> owns the current phase. **Phase 0 stays in main** — it needs the user (requirement gate)
+> and the conversation context only main holds; main must pass the extracted requirement
+> (what/why/scope/acceptance/constraints) INTO the orchestrator's spawn prompt, because the
+> orchestrator cannot see conversation history. Do NOT run Phase 1+2+5 in main context.
+> The per-phase headers tag which agent owns them.
+
+The plan you produce is a **decision document that de-risks the change before anyone
+touches code** — not a coding task. Its quality is judged by whether the fixer can
+execute it safely in parallel without re-deciding anything.
+
+## Operating rules (inherited from fix-plan)
+
+- **Delegate all gathering — enforced.** The main agent's own Read/Grep/Glob/Bash/
+  codebase-memory calls are blocked by a PreToolUse hook (`main-agent-gather-guard.sh`).
+  Gather through subagents; this keeps main context clean. Subagents:
+  - `haiku-codebase-memory` — trace_path, who-calls-X, impact, find code by symbol.
+    **Always pass project `www-wwwroot-gass-be`.**
+  - `haiku-explorer` — read project-docs, find files/patterns, local search; also read
+    the spec/PRD file if one was passed.
+  - `haiku-research` — Tavily web research: best practice, common pitfalls, latest docs.
+  - `haiku-db` — schema shape, row counts, existing data the feature must coexist with.
+  - `haiku-logs` / `haiku-bash` — only if you must confirm a runtime fact.
+  - `codex:codex-rescue` — adversarial review of the chosen design (gated by risk).
+- **Haiku FETCHES, you DECIDE.** Subagents pull raw signal (snippets, call edges, doc
+  quotes, schema/row counts) verbatim. They do NOT pick the design or judge tradeoffs.
+  YOU do all the deciding. A subagent that recommends an approach is doing your job at
+  lower quality — keep the line sharp.
+- **Fan out WIDE, scope each tight.** For N independent facts, spawn N subagents in ONE
+  batch (parallel, wall-clock ≈ slowest). Each gets ONE bounded objective, **≤8 tool
+  calls**. Never resume a finished agent — a fresh narrow spawn is cheaper.
+- **Output contract on every spawn.** End each prompt with: "Return ONLY `file:line` +
+  verbatim quotes/snippets + numbers (or doc finding + URL). No assessment, no
+  recommendation, no narration."
+- **Evidence or it didn't happen.** Every plan claim cites `file:line`, a row count, a
+  quoted doc, or a quoted line from the conversation/spec. Unsure → "belum yakin" + what
+  to check.
+- **You design, you do not apply.** No Edit/Write to code. The only files you write are the
+  plan document and the `.tasks.json` handoff file. Code changes are the fixer's job.
+
+## Execution model — hybrid nested orchestrator
+
+The gather-heavy phases (1+2) run inside a **nested Opus orchestrator** spawned by main.
+Decision/user/task phases stay in main because they require tools that are main-loop-only.
+
+| Phase | Runs where | Why |
+|---|---|---|
+| 0 — Ingest requirement | **main** | Source of truth is conversation context; requirement gate may need `AskUserQuestion` (main-only) |
+| 1 — Recon + research | **ORCHESTRATOR** | Wide parallel fan-out; Opus reasons over the full recon in one context |
+| 2 — Decide design | **ORCHESTRATOR** | Reasoning continues from Phase 1 in the same context — no context loss between recon and decision |
+| 3 — Clarify | **main** | User gate — `AskUserQuestion` is main-only |
+| 4 — Codex review | **main** | `codex:codex-rescue` spawn is a main-level concern |
+| 5 — Breakdown + write .tasks.json | **ORCHESTRATOR** | Subagents have the `Write` tool; orchestrator writes the durable handoff file directly |
+| 6 — Re-review | **main** | Second Codex pass (high risk) or main self-check |
+| 7 — Write plan + handoff | **main** | Writes the plan markdown and closes the loop |
+
+**Phase 0 nuance:** Phase 0 (Ingest requirement) stays in MAIN because its requirement gate
+may need to ask the user (`AskUserQuestion` is main-only) AND the source of truth is the
+conversation context which the main agent holds. The orchestrator is spawned **for
+Phase 1+2+5**, and main must pass the extracted requirement (what / why / scope / acceptance
+criteria / constraints) into the orchestrator's prompt, since the orchestrator does not see
+the conversation history.
+
+**How to spawn:**
+```
+Agent(
+  subagent_type="plan-orchestrator",
+  model="opus",
+  prompt=<see spawn-prompt brief below>
+)
+```
+The orchestrator reasons as Opus and fans out the `haiku-*` fetchers internally — main
+context stays clean.
+
+(The orchestrator's system prompt carries the fan-out rules, output contract, 3-part return
+contract, and BLOCKED protocol — do not re-paste them here.)
+
+**Spawn-prompt brief — what main MUST pass in (the orchestrator sees NONE of the
+conversation):**
+
+- **Extracted requirement** (from Phase 0): What / Why / Scope IN-OUT / Acceptance criteria
+  / Constraints — verbatim, not a pointer to the conversation.
+- **Phases to run**: Phase 1 (recon + research), Phase 2 (design), Phase 5 (breakdown +
+  write `.tasks.json`).
+- **Project for haiku-codebase-memory**: `www-wwwroot-gass-be`.
+- **Slug + scratch path**: the plan slug and `project-docs/plans/.<slug>-scratch.md`.
+- **Machine-handoff path + EXACT JSON schema** the orchestrator must use when writing
+  `project-docs/plans/<slug>.tasks.json` in Phase 5:
+  ```json
+  {"id":"T1","wave":1,"blockedBy":[],"files":["path/a.go"],"track":"build",
+   "change":"one line what changes","verify":"command that proves THIS item works",
+   "rollback":"how to undo","risk":"low","status":"pending"}
+  ```
+  `track` ∈ `build | test | migration | docs`. `status` always seeded as `"pending"`.
+- **Which output to return**: design decisions + raw citations (Phase 2) AND the breakdown
+  summary (Phase 5). The `.tasks.json` file written in Phase 5 is the durable handoff;
+  main must not write or rewrite it.
+
+**Cleanup:** main deletes the scratch file after Phase 7 writes the real plan (anti-orphan
+rule). If the plan ends BLOCKED/unresolved, keep the scratch file and note its path in the
+plan's Open questions section.
+
+## Phase 0 — Ingest the requirement (the gate fix-plan doesn't have)
+
+The source of truth is the **conversation context** — what the user described, agreed to,
+or rejected earlier this session. If a spec/PRD path was passed as an argument, have
+`haiku-explorer` read it and merge it with the conversation.
+
+Extract and write down explicitly:
+- **What** — the feature/change in one paragraph, in the user's own terms.
+- **Why** — the goal it serves (quote the user's words where possible).
+- **Scope IN / scope OUT** — what is included, and what was mentioned but explicitly NOT
+  part of this change. Scope creep starts here; pin it now.
+- **Acceptance criteria** — the observable behaviors that define "done". An incident has
+  a RED test that must go GREEN; a new feature has nothing yet, so YOU must define what
+  green looks like (endpoint returns X, job processes Y, UI shows Z). Every criterion
+  must be checkable by a command or a concrete manual step.
+- **Constraints** — anything the user stated: deadline, tech choice, backward compat,
+  "jangan sentuh X".
+
+**Requirement gate:** if after this you cannot state acceptance criteria concretely, or
+the scope is ambiguous enough that two reasonable engineers would build different things
+— STOP and ask the user. One question at a time. Planning on a vague requirement wastes
+the whole chain (the equivalent of fix-plan's "root cause not confirmed" warning).
+
+Set an initial **RISK level** — it gates Codex usage and editor choice downstream:
+- **low** — 1-2 files, local logic, no schema change, no cross-service, no new dependency.
+- **med** — multi-file, OR new table/column, OR touches a shared function/state-machine
+  /queue, OR new external dependency.
+- **high** — cross-service, schema/contract change others consume, data migration, auth
+  /payment/anything money- or security-shaped.
+
+## Phase 1 — Recon + research (parallel, then barrier)
+
+> Runs inside the nested Opus orchestrator (see Execution model), seeded with the requirement main extracted in Phase 0. It fans out the haiku below and returns recon + design + raw citations to main; the barrier is internal to the orchestrator. Phase 5 (breakdown + write `.tasks.json`) also runs in this same orchestrator context, after Phase 2.
+
+Fan out in ONE batch. Scale the set to RISK (low → skip web research + domain read if the
+change is trivially local; med/high → run all). **Mandatory for med/high:**
+
+- `haiku-codebase-memory` — **integration-point pass (the implementation-specific one):**
+  where does this feature attach to existing code? Find the route table/router, the
+  handler layer, the service/repo layer, the cron/job registry, the config loader —
+  whichever the feature touches. Return `file:line` of each attachment point and the
+  existing pattern used there (so the new code can mirror it).
+- `haiku-codebase-memory` — **blast radius of the CHANGE:** for every existing function
+  /type/table the feature will modify (not just add next to), run
+  `trace_path(<symbol>, mode=calls, direction=both, risk_labels=true)` — who calls it,
+  what contract is shared, what breaks if it changes. `mode=cross_service` if the feature
+  crosses a boundary.
+- `haiku-explorer` — **EXISTING-vs-NEW sweep:** search for existing code that already does
+  (part of) what the feature needs — helpers, similar endpoints, half-built attempts.
+  Building a duplicate of something that exists is the top failure mode of feature work.
+- `haiku-explorer` — **domain pass (mandatory unless pure infra):** read
+  `project-docs/project/` (business logic, glossary) + relevant `project-docs/decisions/`
+  (ADRs). The fixer must NOT be the first to see a business constraint.
+- `haiku-explorer` — **pitfalls pass (mandatory):** read `project-docs/tech-pitfalls/<tech>.md`
+  for every tech the feature touches (clickhouse, mysql, go, redis, …). Landmines belong
+  in the plan, not discovered mid-execution.
+- `haiku-research` — best practice + common pitfalls + latest official docs for the
+  technique the feature uses (e.g. "Go worker pool graceful shutdown", "MySQL online DDL").
+  Skip for low-risk local changes.
+- `haiku-db` — if the feature reads/writes existing data: current schema shape, row
+  volumes, existing values the new code must tolerate. This sizes migration/backfill work.
+
+**Barrier:** do not enter Phase 2 until every spawned agent has returned. Deciding on
+partial recon is how plans miss a caller or a constraint.
+
+## Phase 2 — Decide the design (you reason, do not delegate)
+
+> Runs inside the orchestrator, continuing from Phase 1's recon in the same context. "You" here = the Opus orchestrator. It returns the design + raw citations to main. Phase 5 follows immediately in the same orchestrator context.
+
+Synthesize the recon into the core decisions. This is the heart of the skill.
+
+1. **EXISTING vs NEW — decide for every component.** Using the Phase 1 sweep: reuse,
+   extend, or create new, per component. Default to reuse/extend; creating a parallel
+   path next to an existing one needs a written justification.
+2. **Architecture fit.** Place each piece of new code in the layer that owns the concern
+   (handler vs service vs repo vs job), mirroring the existing pattern found at the
+   integration points. Name the pattern and its `file:line` exemplar so the fixer copies
+   the house style, not generic style.
+3. **Data design** (if any): new tables/columns/keys, indexes, who writes, who reads,
+   migration strategy. For schema changes others consume: expand → migrate → contract.
+4. **Pick ONE approach + reject the alternatives (ADR discipline).** If the discussion
+   offered options, choose one and write *why the others lose* (blast radius, risk,
+   reversibility, cost). One paragraph per rejected option.
+5. **Deploy / change order.** If the feature spans a writer and a reader (or a producer
+   and consumer, or schema and code), state which must land first. Getting order wrong
+   breaks prod even when each edit is correct.
+6. If a decision is genuinely architectural, plan to drop an ADR into
+   `project-docs/decisions/` as part of the work.
+
+## Phase 3 — Clarify (the ONE place you stop for the user)
+
+Before deciding no questions are needed, **list every implicit assumption** you made in
+Phase 2 (target files, design, what "done" means). Then ask the user **only** when an
+assumption could change the target, the design, or the acceptance criteria — i.e. a
+genuine gray area, ambiguity, or business-logic conflict. Otherwise skip silently.
+
+- Ask **one question at a time.** Cache the answer; don't re-ask.
+- For an EXISTING-vs-NEW conflict, use this template:
+  ```
+  EXISTING vs NEW conflict.
+  EXISTING: <name @ file:line — what it does, who uses it>
+  PROPOSED: <new thing, why>
+  OPTIONS: (a) reuse  (b) extend  (c) create new  (d) migrate
+  RECOMMENDATION: <option> — <reason>
+  TRADE-OFF: <speed vs cleanliness vs blast radius>
+  ```
+- Don't ask cosmetic questions or things you can resolve from evidence. The user's time
+  is for real forks only.
+
+## Phase 4 — Codex review of the design (gated by RISK)
+
+Send the chosen design (decisions + evidence) to `codex:codex-rescue` for an
+**adversarial** pass — not a rubber stamp. Prompt it: "Try to break this design. What
+edge case does it miss? What race or ordering bug? What existing code does it duplicate
+or conflict with? Is there a cheaper/safer way? What would make it fail in prod?"
+
+- **low** → skip Codex; your own Phase 2 reasoning stands.
+- **med** → 1 Codex pass on the design.
+- **high** → 1 Codex pass on the design now (a second pass on the breakdown comes in
+  Phase 6).
+
+YOU decide what to incorporate vs reject from Codex's reply, with reasons. Codex advises;
+you own the plan.
+
+**Loop-back on a fundamental break.** If Codex surfaces a flaw that invalidates the
+*design itself* (not a detail you can patch in the breakdown) — a missed edge case the
+design can't handle, a race it causes, a duplicate of existing code you'd actually
+replace, a cheaper/safer design you'd switch to — return to **Phase 2** and re-decide,
+then re-run this review. At most **2 loops**, then proceed with the best design you have
+and log the unresolved concern in the plan's Open questions. A patchable detail does not
+trigger a loop — fold it into the breakdown instead. Don't loop forever; don't proceed on
+a known-broken design either.
+
+## Phase 5 — Breakdown (executor-ready, parallel-safe)
+
+> Runs in the ORCHESTRATOR, continuing from Phase 2's design in the same context. The orchestrator has the `Write` tool and writes `project-docs/plans/<slug>.tasks.json` directly before returning. This dissolves the old "TaskCreate is main-only" constraint.
+
+Decompose the implementation into **atomic work items** arranged in **waves** (topological
+layers). Items in the same wave have no dependency on each other and are safe to run in
+parallel; later waves wait for earlier ones (barrier between waves).
+
+Each work item MUST carry these fields — the fixer uses them to compute parallel safety:
+
+```json
+{"id":"T1","wave":1,"blockedBy":[],"files":["path/a.go"],"track":"build",
+ "change":"one line what changes","verify":"command that proves THIS item works",
+ "rollback":"how to undo","risk":"low","status":"pending"}
+```
+
+`track` ∈ `build | test | migration | docs`. `status` is always seeded as `"pending"`.
+
+Implementation-specific breakdown rules (on top of the parallel-safety rules):
+- **Tests are work items, not afterthoughts.** A new feature has no RED test to flip
+  GREEN — so the breakdown must CREATE the verification. For each acceptance criterion,
+  there is a work item (track: test) that builds the test/check proving it. Where
+  practical, the test item lands in the same wave or earlier than the code it verifies.
+- **Freeze shared contracts first.** New types/signatures/schema that several items
+  depend on are wave 1; the dependents are wave 2+. Schema migrations land before code
+  that uses them.
+- **No intra-wave dependency.** If T_b needs T_a, they go in different waves. Never put a
+  dep inside its own wave.
+- **File-disjoint within a wave.** Two items in the same wave must not touch the same
+  file (else the fixer serializes them or uses worktrees). Split or re-wave if they clash.
+
+**Write the handoff file — this is mandatory, not optional.** The plan markdown is for
+humans (detail, rationale, deploy order); the **`.tasks.json` file is the durable machine
+handoff** the fixer actually executes from. Write the complete JSON array to
+`project-docs/plans/<slug>.tasks.json` (same `<slug>` as the plan markdown). The fixer
+must NOT parse the markdown — markdown parsing is fragile. Every field the fixer needs
+lives in the JSON objects.
+
+This makes execution **resumable, restart-safe, and parse-free**: the fixer reads
+`<slug>.tasks.json`, claims any item with `status:"pending"` and `blockedBy:[]`, executes
+it, updates `status` to `"done"`, and the rest unblock automatically — so a stalled run
+reloads from the file, never restarts from scratch and never re-parses the doc.
+The plan markdown and `.tasks.json` must agree; **`.tasks.json` is the source of truth for
+execution**.
+
+## Phase 6 — Re-review the breakdown
+
+Check the breakdown for the failure mode Phase 5 is prone to: a false "parallel-safe"
+(hidden dep, shared file, contract not actually frozen) — plus the feature-specific one:
+an acceptance criterion with NO work item that builds its verification.
+
+- **high** RISK → second `codex:codex-rescue` pass, focused only on the wave/dependency
+  graph: "Are these waves truly independent? Any hidden ordering or shared-state race?
+  Does every acceptance criterion have a verifying item?"
+- **low/med** → main-agent self-check against the breakdown rules above.
+- Revise and re-check at most **2 loops**, then proceed (log unresolved concerns in the
+  plan's Open questions). Don't loop forever.
+
+## Phase 7 — Write the plan + hand off
+
+Write to `project-docs/plans/YYYY-MM-DD-<slug>.md` (today's date from context). Structure:
+
+```markdown
+# Implementation Plan: <short title>
+
+- **Date**: <date>  **Source**: conversation <session summary line> | <spec/PRD path>
+- **Risk**: <low/med/high>
+- **Status**: ready for execution
+- **Tasks**: `project-docs/plans/<slug>.tasks.json`
+
+## Requirement
+<what + why, in the user's terms. Scope IN / scope OUT explicit.>
+
+## Acceptance criteria
+- <observable behavior 1 — and the command/check that proves it>
+- ...
+
+## Design
+<the chosen design: EXISTING-vs-NEW decisions, layer placement with file:line exemplars,
+data design if any>
+
+## Alternatives rejected
+- <option> — rejected because <reason>
+
+## Deploy order
+<if schema/code or writer/reader split: what lands first, and why>
+
+## Work items
+
+> Full executable spec lives in `<slug>.tasks.json` — do not duplicate fields here.
+> `.tasks.json` is the source of truth for execution; this section is a human index only.
+
+<one line per item: `id` — change (wave N, track)>
+
+## Verification
+- <how the WHOLE feature is proven done — maps 1:1 to acceptance criteria>
+- <regression checks on existing behavior the feature touches>
+
+## Rollback
+<how to back the whole change out of prod if it misbehaves>
+
+## Open questions
+<anything Codex/self-review flagged but didn't resolve>
+```
+
+**Handoff gate** — before declaring ready, confirm the plan has: explicit acceptance
+criteria + narrowed change zone (`file:line` integration points, not "the service") +
+explicit verify per item + every acceptance criterion covered by a test/check item +
+rollback. If any is missing, the plan is not ready — fix it, don't hand off a vague plan.
+
+## Phase 8 — Chat summary
+
+Reply in chat (Bahasa Indonesia, terse): the design in 1-2 lines, scope (IN/OUT satu
+baris), number of work items + waves, the plan file path + tasks file path. End with the
+bridge: **"Mau eksekusi? `/fixer <plan-path>`."** (Fixer reads `<slug>.tasks.json` for the
+executable work items.) Then **stop** — do not start editing code.
