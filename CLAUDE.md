@@ -112,6 +112,18 @@ Untung delegasi muncul saat (raw besar + user-gate jarang). Di luar itu overhead
 menang → net rugi. Catatan: custom agent (`plan-orchestrator`) cuma ke-load saat
 session start — kalau belum ke-load, pakai `Explore` atau kerja langsung.
 
+## Subagent return = lead, bukan fakta
+Subagent (haiku kecil apalagi) ngisi gap output pakai default optimis: command ga
+keluar output → ditandai "✅ likely OK" drpd balik kosong. Helpfulness-bias, ada di
+semua ukuran model. Maka:
+- Klaim aksi-penting dari subagent (build lulus, test hijau, file/symbol ada,
+  migrasi sukses) = LEAD, bukan kebenaran. Sebelum branch keputusan atasnya,
+  re-verify sendiri 1 command/cek murah.
+- Curiga ke `✅`/`OK` tanpa bukti dikutip, dan ke hedge berbalut yakin ("not shown
+  but likely", "typical", "should pass"). Itu sinyal ngarang, bukan observasi.
+- Subagent balik `NOT_RUN`/`UNSURE`/`UNKNOWN` = jujur, hargai — jalankan sendiri,
+  jangan anggap selesai. Diam (target ga disebut) ≠ lulus.
+
 ## Done-gate (all must be yes)
 - [ ] Every symbol/value named was seen in tool output this session.
 - [ ] Every claim has `file:line`/number/error/query.

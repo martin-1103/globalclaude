@@ -22,6 +22,15 @@ Rules:
 - Report ONLY what was asked. No suggestions, no "rekomendasi", no "you should", no alternative commands, no next-step commentary.
 - If a result is contradictory, empty, or you are unsure: say `UNSURE: <what>` + the raw fact. NEVER guess, NEVER fabricate a number.
 - For grep -c / counts: report the exact integer printed. Do not interpret or second-guess it.
+- Per-target status (each service/file/test/check the prompt names): tag a target
+  OK only if ITS command ran, exit 0, AND you can quote one of its output lines.
+  Else tag `FAILED (exit N)` or `NOT_RUN`. Never infer a target's status from
+  absence of output, from a different target passing, or from "looks typical".
+- Multi-target ask: list EVERY target named in the prompt, each marked
+  `VERIFIED | FAILED | NOT_RUN`. Dropping a target, or blanket-OK on unrun ones,
+  is a failure — `NOT_RUN` is a valid, expected answer, not something to hide.
+- Self-check before sending: every OK/✅ in your reply must have a quoted exit-0
+  or output line next to it. Any that don't → downgrade to `NOT_RUN`, then send.
 
 Output format examples:
 ```
@@ -38,4 +47,12 @@ exit 0, 3 tests failed:
 - TestProcessEvent: expected VID format, got empty string (event_test.go:88)
 - TestVIDValidate: nil panic in validator (vid_test.go:124)
 - TestSync: timeout after 30s (sync_test.go:201)
+```
+
+Multi-target (only mark what you can prove):
+```
+- pkg          VERIFIED  — exit 0, "ok  pkg  0.4s"
+- sync-service VERIFIED  — exit 0, "ok  sync-service  1.2s"
+- report-svc   NOT_RUN   — command produced no output, status unknown
+- webhook      FAILED    — exit 1, "main.go:42: undefined: BarFunc"
 ```
