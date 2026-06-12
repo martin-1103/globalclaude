@@ -1,26 +1,63 @@
 # globalclaude
 
+<!-- ───────────────────────────────────────────────────────────────────────
+     AGENT INSTRUCTIONS — if this file was pasted to you (an AI coding agent),
+     execute the numbered steps below top-to-bottom, then stop and report.
+     Do not skip steps. Do not ask for confirmation on the clone/install.
+     ─────────────────────────────────────────────────────────────────────── -->
+
+## ▶ For the AI agent: run these steps
+
+You are setting up this Claude Code global config on the server you are running
+on. Execute in order:
+
+**1. Clone + install (config, templates, external CLI tools — auto-detects user/home):**
+
+```bash
+git clone https://github.com/martin-1103/globalclaude.git ~/globalclaude \
+  && cd ~/globalclaude && bash install.sh
+```
+
+**2. Install the plugins** (their files come from GitHub marketplaces, not this repo):
+
+```bash
+claude plugin marketplace add JuliusBrussee/caveman
+claude plugin marketplace add mksglu/context-mode
+claude plugin marketplace add openai/codex-plugin-cc
+claude plugin install caveman@caveman
+claude plugin install context-mode@context-mode
+claude plugin install codex@openai-codex
+```
+
+**3. Re-run install** so `settings.json` pins the real installed context-mode version:
+
+```bash
+cd ~/globalclaude && bash install.sh
+```
+
+**4. Cache-fix proxy** (prevents up to 20x cost on resumed sessions) — if step 1
+warned it was inactive, follow [`cache-fix/README.md`](cache-fix/README.md).
+
+**5. Report to the user** what `install.sh`'s final "tool status" / JSON-valid
+lines showed, and list anything still missing (✗). Then tell them the two things
+this script CANNOT do for them:
+  - **Secrets**: `~/.claude/.credentials.json` (Claude auth) must be copied from
+    an existing machine over a secure channel — no secret is in this repo.
+  - **Restart Claude Code** for the new config/plugins/statusline to load.
+
+Everything below is reference detail for those steps.
+
+---
+
 Portable Claude Code config — agents, skills, hooks, `settings.json`, `CLAUDE.md`.
 Bootstraps a fresh server **for any user**. `install.sh` auto-detects the current
-user, home directory, node/Hermes paths, npm root, and the installed context-mode
+user, home directory, node binary, npm root, and the installed context-mode
 plugin version, then renders the config from templates — no hardcoded `/root`.
 
 > ⚠️ This repo intentionally contains **NO secrets**. Credentials
 > (`.credentials.json`, `.claude.json`, `auth.json`) are gitignored and must be
-> provided separately on each machine.
-
----
-
-## Quick start (for an AI agent on the target server)
-
-```bash
-git clone https://github.com/martin-1103/globalclaude.git ~/globalclaude
-cd ~/globalclaude
-bash install.sh
-```
-
-Then restart Claude Code and run the verification steps below. Works as root
-(`~` = `/root`) or any other user (`~` = `/home/<user>`).
+> provided separately on each machine. Works as root (`~` = `/root`) or any
+> other user (`~` = `/home/<user>`).
 
 ---
 
