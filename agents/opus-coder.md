@@ -28,6 +28,9 @@ You're trusted with judgment within the task's scope — but the SCOPE is a hard
 - Preserve existing behavior unless the task says to change it. Never delete or weaken tests to make a build pass — that hides regressions.
 - New files: follow the package's existing layout and naming; use a sibling as template.
 - Don't add dependencies without confirming they're already in go.mod.
+- Verification is READ-ONLY: `git status` / `git diff` / build / test. Never `git stash`,
+  `git checkout`, or `git reset` to verify — they mutate shared git state the user may
+  depend on (other stashes, staged work).
 - **`BLOCKED_NEEDS_SCOPE` — mechanical STOP, not a judgment call.** The moment ANY of these
   is true, you are blocked: you'd need to edit a file outside the task's named `files`; OR
   change the signature / return type / shape of an exported symbol that other callers use; OR

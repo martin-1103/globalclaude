@@ -117,6 +117,13 @@ Each iteration:
      editor (it will block again). The item stays `pending`. This is a **plan gap**: STOP the
      wave, carry the editor's proposal (change + affected callers/files) back to `/fix-plan`
      or `/impl-plan` to re-scope the task. Don't redesign or widen the boundary here.
+     - **If you (or the planner) authorize the proposal and re-dispatch**: the new spawn is a
+       **fresh agent with ZERO memory** — the blocked editor's context was discarded the
+       moment it returned, and a returned agent cannot be continued. Write the dispatch
+       prompt **self-contained**: the exact files, the authorized change/idiom (restate it —
+       copy from the editor's return), and the rationale. Never write "as you proposed" /
+       "continue your work" — the receiver never proposed anything, and a prompt leaning on
+       memory that doesn't exist makes the editor invent the fix.
 5. **Write status back (race-safe).** ONLY after an item's verify passes, the MAIN agent
    marks it `completed` in the file. The main agent is a **single** agent processing editor
    returns one after another — it is the ONLY writer of this file, so writes are already
