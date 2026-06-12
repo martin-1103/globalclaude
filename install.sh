@@ -148,9 +148,9 @@ cat <<'EOF'
       claude plugin install context-mode@context-mode
       claude plugin install codex@openai-codex
 
-[B] RE-RUN this script — pins the real installed context-mode version
-    into settings.json (otherwise hooks fail "file not found"):
-      cd "$(pwd)" && bash install.sh
+[B] RE-RUN this script from the repo dir — pins the real installed
+    context-mode version into settings.json (else hooks fail "file not found"):
+      cd ~/globalclaude && bash install.sh
 
 [C] Secrets (NOT in this repo — copy from an existing machine):
       ~/.claude/.credentials.json   # Claude auth — required to log in
