@@ -103,27 +103,11 @@ esac
 [[ -n "$SUB" ]] || exit 0
 
 # ── Deny-candidate: is a subagent the real caller? ───────────────────────────
-TP=$(printf '%s' "$INPUT" | jq -r '.transcript_path // ""' 2>/dev/null || echo "")
-TID=$(printf '%s' "$INPUT" | jq -r '.tool_use_id // ""' 2>/dev/null || echo "")
-# fail-open: can't detect → allow (never wedge main flow on parse gaps)
-[[ -n "$TP" && -n "$TID" ]] || exit 0
+# Verified live 2026-06-12 (payload probe): subagent payloads carry `agent_id`;
+# main-thread payloads do not. Deterministic — replaces the old transcript-poll
+# heuristic (200ms poll + 3s mtime gate) that mis-classified working subagents
+# as main and triggered gather-agent spawn cascades.
+AGENT_ID=$(printf '%s' "$INPUT" | jq -r '.agent_id // ""' 2>/dev/null || echo "")
+[[ -n "$AGENT_ID" ]] && exit 0   # subagent owns this gather → allow
 
-SUBDIR="${TP%.jsonl}/subagents"
-[[ -d "$SUBDIR" ]] || deny "$SUB"
-
-NEWEST=$(ls -t "$SUBDIR"/*.jsonl 2>/dev/null | head -1 || true)
-[[ -n "$NEWEST" ]] || deny "$SUB"
-
-NOW=$(date +%s 2>/dev/null || echo 0)
-MTIME=$(stat -c %Y "$NEWEST" 2>/dev/null || echo 0)
-(( NOW - MTIME < 3 )) || deny "$SUB"
-
-MF=""
-for _ in $(seq 1 8); do
-  MF=$(grep -lF -- "$TID" "$SUBDIR"/*.jsonl 2>/dev/null | head -1 || true)
-  [[ -n "$MF" ]] && break
-  sleep 0.025
-done
-
-[[ -n "$MF" ]] && exit 0   # subagent owns this gather → allow
 deny "$SUB"
