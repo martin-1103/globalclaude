@@ -112,40 +112,20 @@ Untung delegasi muncul saat (raw besar + user-gate jarang). Di luar itu overhead
 menang → net rugi. Catatan: custom agent (`plan-orchestrator`) cuma ke-load saat
 session start — kalau belum ke-load, pakai `Explore` atau kerja langsung.
 
-## Bentuk spawn = bentuk kerjaan (bukan angka tetap, bukan jenis command)
-Berapa task & gimana dipecah = keputusan teknik dari properti kerjaan, bukan refleks
-"selalu kecil" / "selalu 1 besar", bukan ngapalin "command X → shape Y". Tiga sumbu,
-jawabannya nentuin shape buat case APAPUN (docker, migrasi, refactor, riset):
-- **Ada yang ngubah state?** (tulis/restart/delete/deploy) → itu task sendiri, keliatan,
-  jangan pernah dicampur sama read. Re-run task read = aman; re-run task mutasi =
-  side-effect kejadian LAGI. Misah by side-effect, bukan by jumlah.
-- **Potongannya saling nunggu?** Nunggu → 1 chain (paralel mustahil). Independen → boleh
-  paralel. Jangan paralelin yang sequence-dependent; jangan serialin yang independen.
-- **Output bakal gede/berisik?** Gede → isolasi tiap probe (itu guna subagent: buang raw
-  byte). Kecil → gabung; ongkos boot subagent (~20s) cuma worth kalau hemat > 20s.
+## Bentuk & paralelisme tool call
+Shape (berapa task, dipecah gimana) = properti kerja, bukan refleks "selalu kecil/besar"
+atau hafalan command. 3 sumbu: (1) **mutasi** (tulis/restart/delete)? → task sendiri,
+visible, jangan campur read — re-run read aman, re-run mutasi = side-effect lagi;
+(2) **saling nunggu?** → chain; independen → paralel; (3) **output gede?** → isolasi
+(subagent buang raw byte); kecil → gabung (boot ~20s mesti ke-amortize).
 
-Shape itu **keputusan, bukan reaksi ke user.** User bilang "pecah kecil" → kalau emang
-independen+gede, pecah. Kalau sequence-dependent + cheap, **tahan + jelasin kenapa** —
-mecah 5 step berurutan jadi 5 spawn paralel = bayar 5× boot buat kerja yang ga bisa
-paralel. Nurut buta = sycophancy (lawan "be right not agreeable"); ngeyel = sama buruk.
-Argue dari properti, bukan dari siapa yang ngomong.
+Gerbang tiap emit tool (main+subagent, SEMUA tool): **daftar call yang ga saling butuh →
+satu message, banyak tool_use** (CC jalanin concurrent, verified). Serial HANYA kalau
+call berikut butuh hasil sebelumnya. Default-bug: 1 tool/message = serial walau independen
+(niat "usahakan paralel" drift; gerbang di momen emit nempel, pola Done-gate).
 
-### Trigger: sebelum emit tool call apapun, batch yang independen
-Berlaku **main DAN subagent, SEMUA tool** (Read/Edit/Bash/Agent/gather) — bukan cuma
-Agent spawn. CC jalanin banyak tool_use dalam SATU message secara concurrent (verified
-2026-06-12: 2 Agent 1 message → wall-clock overlap, bukan jumlah). Default-bug: emit 1
-tool per message → semua serial walau independen.
-
-Gerbang paksa tiap mau manggil tool: **stop, daftar semua call yang hasilnya ga saling
-butuh → emit dalam SATU message (satu block, banyak tool_use). Berurutan HANYA kalau
-call berikut butuh hasil sebelumnya.**
-- Batch: baca 3 file buat paham 1 fitur; edit 2 file independen; spawn N audit/probe
-  independen. Satu message.
-- Serial (sah): Read A → isinya nentuin B mana yang dibaca. Dependent, ga bisa dibatch.
-Kenapa trigger "sebelum emit", bukan niat "usahakan paralel": niat drift & ke-skip;
-gerbang di momen tetap ke-trigger tiap call (pola sama kayak Done-gate). Akar bug =
-perlakuin SEMUA call dependent padahal banyak independen dari awal — gerbang ini maksa
-nanya "butuh hasil sebelumnya?" sebelum tiap call.
+Shape = keputusan, bukan reaksi user. "Pecah kecil" tapi kerja sequence-dependent+cheap →
+tahan+jelasin (5 step serial jadi 5 spawn = 5× boot sia-sia). Nurut buta = sycophancy.
 
 ## Subagent return = lead, bukan fakta
 Subagent (haiku kecil apalagi) ngisi gap output pakai default optimis: command ga
