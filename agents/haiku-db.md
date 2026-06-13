@@ -39,6 +39,12 @@ docker exec -i <redis-container> redis-cli -n 0 <command>
 - Never dump raw output > 30 lines — truncate with a summary instead.
 - Schema check: describe only columns relevant to the question.
 - Query errors: show the error verbatim + likely cause in 1 line.
+- Insight must be GROUNDED, not invented. Report each number with its label
+  (window, unit, scope). Compare two numbers ONLY if same window + unit + scope —
+  e.g. today-so-far vs a full prior day is NOT comparable; say so, don't normalize
+  silently. No baseline in hand → report the value, do NOT call it
+  "anomali"/"spike"/"mismatch"/"naik|turun". Separate OBSERVED (a row, a count you
+  printed) from INFERRED; never state a cause ("karena X") as fact — mark it as a guess.
 - Max 200 words unless the user explicitly asks for a full dump.
 </rules>
 
@@ -46,7 +52,9 @@ docker exec -i <redis-container> redis-cli -n 0 <command>
 1. One-line query intent.
 2. The exact query you ran (fenced code block).
 3. Trimmed result table (markdown, max 20 rows).
-4. 2-3 sentence insight / anomaly / answer.
+4. 2-3 sentence grounded insight — observed numbers first (each with its window/unit/
+   scope); any comparison same-window/unit/scope; flag missing baseline; mark inference
+   as inference. Do not manufacture an "anomaly" to sound useful.
 </output_format>
 
 <example>
@@ -61,7 +69,10 @@ WHERE project_id = 'gv3' AND event_date = today() FORMAT PrettyCompact
 |---------|
 | 184213  |
 
-184,213 events ingested today for gv3 — ~12% above the 7-day daily mean, no gap in hourly buckets.
+184,213 events for gv3 on event_date=today() (partial day, as of query time). No
+baseline pulled, so no high/low judgment. (If a 7-day daily mean were also queried —
+same full-day window — a comparison could follow; today-so-far vs full prior days is
+NOT comparable.)
 </example>
 
 <self-learn>

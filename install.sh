@@ -62,21 +62,25 @@ if [ -f "$CLAUDE_DIR/settings.json" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Copy plain config (no path substitution needed)
+# 3. Symlink plain config (edits in ~/.claude go straight back to repo)
 # ---------------------------------------------------------------------------
-log "Copying agents/ skills/ hooks/"
-cp -r "$REPO_DIR/agents"  "$CLAUDE_DIR/"
-cp -r "$REPO_DIR/skills"  "$CLAUDE_DIR/"
-cp -r "$REPO_DIR/hooks"   "$CLAUDE_DIR/"
+log "Symlinking agents/ skills/ hooks/"
+for _dest in "$CLAUDE_DIR/agents" "$CLAUDE_DIR/skills" "$CLAUDE_DIR/hooks"; do
+  [ -e "$_dest" ] && [ ! -L "$_dest" ] && rm -rf "$_dest"
+done
+ln -sfn "$REPO_DIR/agents"  "$CLAUDE_DIR/agents"
+ln -sfn "$REPO_DIR/skills"  "$CLAUDE_DIR/skills"
+ln -sfn "$REPO_DIR/hooks"   "$CLAUDE_DIR/hooks"
 
-log "Copying root files"
-cp "$REPO_DIR/CLAUDE.md"     "$CLAUDE_DIR/"
-cp "$REPO_DIR/RTK.md"        "$CLAUDE_DIR/"
-cp "$REPO_DIR/statusline.sh" "$CLAUDE_DIR/"
-chmod +x "$CLAUDE_DIR/statusline.sh" "$CLAUDE_DIR/hooks/"* 2>/dev/null || true
+log "Symlinking root files"
+ln -sfn "$REPO_DIR/CLAUDE.md"     "$CLAUDE_DIR/CLAUDE.md"
+ln -sfn "$REPO_DIR/RTK.md"        "$CLAUDE_DIR/RTK.md"
+ln -sfn "$REPO_DIR/statusline.sh" "$CLAUDE_DIR/statusline.sh"
+chmod +x "$REPO_DIR/statusline.sh" "$REPO_DIR/hooks/"* 2>/dev/null || true
 
-log "Copying caveman hooks -> $CPROXY_DIR/hooks"
-cp -r "$REPO_DIR/cproxy-hooks/." "$CPROXY_DIR/hooks/"
+log "Symlinking caveman hooks -> $CPROXY_DIR/hooks"
+[ -e "$CPROXY_DIR/hooks" ] && [ ! -L "$CPROXY_DIR/hooks" ] && rm -rf "$CPROXY_DIR/hooks"
+ln -sfn "$REPO_DIR/cproxy-hooks" "$CPROXY_DIR/hooks"
 
 # ---------------------------------------------------------------------------
 # 4. Render templated config (substitute detected paths)

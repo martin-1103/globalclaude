@@ -95,6 +95,10 @@ blockers rare; if a phase needs the user 3×, it belonged in main.
 
 ## Phase 0 — Recall (cheap, do first)
 
+**Resume check first.** If `project-docs/incidents/.<slug>-scratch.md` already exists,
+a prior run was cut off mid-investigation — read it and resume from the last phase it
+recorded (signature table / label / hypothesis). Do NOT re-gather from zero.
+
 Before gathering anything new, check if this happened before:
 - `ctx_search(sort: "timeline", queries: ["<symptom keywords>", "<service name> error"])` — prior incidents, decisions, fixes from session memory.
 - Skim `MEMORY.md` index for related incident notes.
@@ -217,8 +221,9 @@ How deep mode runs (parallel haiku fan-out, stays flat):
 
 > Runs in **main**, over the orchestrator's returned citations. This is the disprove
 > pass — it must see raw evidence, not just the orchestrator's conclusion. If a needed
-> fact is missing, spawn a fresh narrow orchestrator/haiku for that one fact; do not
-> trust an unbacked claim.
+> fact is missing, spawn a fresh narrow **haiku** for that one fact — a single confirm is
+> a haiku call, NOT a nested orchestrator (orchestrator is for multi-angle fan-out only;
+> spawning opus to confirm one DB row wastes a boot). Do not trust an unbacked claim.
 
 Before locking the root cause, answer two mandatory questions — they catch the two ways
 RCA fails (stopping at a symptom, and confirmation bias):

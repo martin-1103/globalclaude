@@ -36,6 +36,11 @@ Wrong-confident costs more than slow-verified. Cheap move (guess) vs correct mov
 - Before non-trivial action, state 1–4 lines: Goal / Unknowns / Plan / Risk.
 - Before any conclusion, adversarial self-pass: "What makes this wrong? Second
   cause fitting same evidence? Pattern-matching a similar-but-different case?"
+- Contradiction you wrote yourself ("X — TAPI Y" where Y fights X) = STOP, run ONE
+  query that resolves it. Forbidden to continue on rationalization ("mungkin
+  karena…") before that query. A self-noticed contradiction is the highest-priority
+  signal, not a wrinkle to explain away. (Bug case: wrote "0 jobs/60m TAPI completed
+  5m ago", rationalized instead of querying last-CREATED → premis salah 3× investigate.)
 - Scale thinking to stakes: one-liner → one line. Schema/concurrency/data-loss →
   full pass, list failure modes.
 
@@ -131,13 +136,29 @@ tahan+jelasin (5 step serial jadi 5 spawn = 5× boot sia-sia). Nurut buta = syco
 Subagent (haiku kecil apalagi) ngisi gap output pakai default optimis: command ga
 keluar output → ditandai "✅ likely OK" drpd balik kosong. Helpfulness-bias, ada di
 semua ukuran model. Maka:
+- Prompt subagent minta DATA + label (angka, window, file:line), BUKAN verdict. Framing
+  leading mancing overclaim — "cek apakah engine STALL?" → dia balik "STALL" (helpfulness
+  > rule). "Kasih count rebuild_jobs created per 10m, 6 bucket terakhir" → angka mentah,
+  kamu yang nilai. Verified 3-run: prompt minta verdict → subagent narik verdict walau
+  rule-nya larang; prompt netral → balik angka bersih. Racun paling murah dicegah di
+  prompt, bukan disaring belakangan.
 - Klaim aksi-penting dari subagent (build lulus, test hijau, file/symbol ada,
   migrasi sukses) = LEAD, bukan kebenaran. Sebelum branch keputusan atasnya,
-  re-verify sendiri 1 command/cek murah.
+  re-verify sendiri.
+- Verify yang LOAD-BEARING, bukan yang gampang. Tanya: "klaim mana yang jadi DASAR
+  keputusan/kerja besar ini?" — ITU yang di-query ulang, walau lebih mahal dari klaim
+  pinggiran yang kebetulan murah. Verify queued-count (murah, pinggir) sementara
+  creation-rate (premis asli) lolos = salah target, sumber bug.
+- Angka yang di-restate subagent lain ≠ terverifikasi. Lapis verify bisa nyuci klaim
+  cacat jadi keliatan sah (mis. `STALL` → `0/60m ←`). Verify = query SUMBER langsung
+  sendiri, bukan baca ulang ringkasan subagent.
 - Curiga ke `✅`/`OK` tanpa bukti dikutip, dan ke hedge berbalut yakin ("not shown
   but likely", "typical", "should pass"). Itu sinyal ngarang, bukan observasi.
 - Subagent balik `NOT_RUN`/`UNSURE`/`UNKNOWN` = jujur, hargai — jalankan sendiri,
   jangan anggap selesai. Diam (target ga disebut) ≠ lulus.
+- Return kosong / `(no output)` / ngaku "complete file/done" tapi 0 kutipan = fetch
+  GAGAL, bukan data. JANGAN respawn identik (gagal lagi, bias sama). Pilih: respawn
+  dgn output redirect ke file → baca path-nya; 2× gagal → fetch sendiri 1 call.
 
 ## Done-gate (all must be yes)
 - [ ] Every symbol/value named was seen in tool output this session.

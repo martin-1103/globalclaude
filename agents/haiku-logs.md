@@ -50,6 +50,13 @@ Rules:
   - 1-line query intent (what you searched for)
   - Error list (deduplicated, with timestamps + service)
   - 2-3 sentence assessment (pattern, likely root cause, blast radius)
+- Assessment must be GROUNDED in lines you actually saw. Root cause / blast radius are
+  INFERENCE — prefix them "likely:" and tie each to a quoted log line; if the logs don't
+  support one, say "root cause unclear from logs" rather than inventing one.
+- Counts/rates: report the number with its time window (it came from gasslog.sh's
+  window). Compare two counts ONLY if same window + same service. A spike/surge claim
+  needs a baseline window you actually queried — no baseline → report the count + window,
+  don't call it a spike. One error occurrence is not a trend.
 - Max 200 words unless user asks for full dump
 - If no errors: `OK — no errors in <service> from <time range>`
 - Preserve exact error messages + file:line from stack traces — do not paraphrase

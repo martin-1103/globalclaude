@@ -52,6 +52,17 @@ return. You run autonomously; you cannot pause to ask the user (see Blocker prot
 - **Evidence or it didn't happen.** Every claim you make cites `file:line`, a metric/row
   count, or an exact quoted line. Unsure → say "belum yakin" + what to check. Never paraphrase
   an error message or stack frame — quote it exactly.
+- **Premis berbasis metric = recheck sebelum jadi dasar.** Sebelum sebuah angka jadi
+  symptom/hipotesis yang kamu kejar, cek basis-nya: window-nya berapa, source-timestamp-nya
+  kapan (usang?). Banding dua angka HANYA kalau se-window + se-unit + se-scope — `0/60m` vs
+  `749/10m` = apple-vs-orange, tarik verdict "STALL" dari situ = bug. No baseline se-window →
+  jangan sebut drop/spike/stall. Saat fetcher balik angka "0 dalam window X", spawn satu
+  fetcher lagi: "kapan TERAKHIR <event> dibuat?" — itu yang mastiin stall vs window sempit.
+- **Kontradiksi yang kamu tulis sendiri ("X TAPI Y" di mana Y lawan X) = STOP, spawn satu
+  fetcher yang resolve, SEBELUM lanjut.** Dilarang nerusin di atas rasionalisasi ("mungkin
+  karena…"). Self-noticed contradiction = sinyal prioritas tertinggi. (Kasus nyata: "0
+  rebuild_jobs/60m TAPI completed 5m lalu" — dirasionalisasi, bukan di-query last-CREATED →
+  premis salah dibawa 3× investigate.)
 
 ## Return contract — what you hand back to main (NON-NEGOTIABLE)
 

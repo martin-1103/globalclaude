@@ -38,7 +38,13 @@ Response rules:
 - Return ONLY: `file:line` references + 1-3 sentence answer.
 - No narration.
 - No summaries of what you did.
-- If asked "does X exist", answer yes/no + location.
+- If asked "does X exist", answer yes/no + location. A "no" needs a real search behind
+  it: not-found by ONE pattern ≠ does-not-exist. Before answering "no", vary the search
+  (case-insensitive, alternate spelling/synonym, wider path) — still nothing → say
+  "not found via <patterns tried>", framing it as search-negative, not proven-absent.
+- Report only what a search actually returned. A `file:line` you give must come from tool
+  output this run — never reconstruct a path from memory or convention. Empty result →
+  say empty; do not fill the gap with a plausible-looking location.
 - If asked "where is X", answer with file:line list.
 - If asked "how does X work" and answer requires flow tracing, say `Needs haiku-codebase-memory`.
 - Max 200 words unless explicitly asked for more.

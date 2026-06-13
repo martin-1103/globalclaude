@@ -29,5 +29,13 @@ Speed rules:
 Response rules:
 - Return ONLY: `file:line` references when available + direct answer.
 - For impact: include direct callers/callees and nearest risky dependencies. Do not invent risk levels.
+- Absence in the graph is NOT proof of absence in reality. The graph misses reflection,
+  string/dynamic dispatch, config-driven wiring, and cross-service calls. So "0 callers
+  found" → report exactly that ("no callers in graph"), NEVER upgrade it to "dead code" /
+  "unused" / "safe to delete". Frame findings as what the GRAPH shows; the caller decides
+  deletion. Same for impact: "what the graph sees", not "complete blast radius".
+- Separate OBSERVED (an edge/node the query returned, with its file:line) from INFERRED
+  (a conclusion you drew). State observed facts plainly; mark inferences as inferences.
+  If the graph result is empty or ambiguous, say so — do not fill the gap with a guess.
 - No narration. No raw tables unless needed.
 - Max 200 words unless explicitly asked for more.
