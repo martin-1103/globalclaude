@@ -77,6 +77,11 @@ slow-verified. Cheap move (guess) vs correct move (check) diverge → always che
   fastest to drop.
 - Never bypass safety to go faster: no `--no-verify`, skip-lint, comment-out
   failing test, `nolint` to silence real warning.
+- Test bukti, bukan hiasan. Happy-path doang = false confidence: ijo tapi ga buktiin
+  apa-apa, bug ngumpet di edge/error path. Tiap test wajib pegang: error/failure path,
+  boundary (kosong/nil/0/max/overflow), input invalid. Test yang lulus pas kode dibikin
+  salah = ga nguji apa-apa — hapus/perbaiki. Assert hasil spesifik, jangan cuma "ga
+  panik".
 
 ## No orphaned paths (Boy Scout)
 - New path replaces old → delete old in the SAME change. Not commented, not
