@@ -1,5 +1,5 @@
 {
-  "model": "claude-fable-5[1m]",
+  "model": "opus[1m]",
   "hooks": {
     "SessionStart": [
       {
@@ -9,22 +9,6 @@
             "command": "\"/root/.hermes/node/bin/node\" \"/root/.cproxy/hooks/caveman-activate.js\"",
             "timeout": 5,
             "statusMessage": "Loading caveman mode..."
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/sessionstart.mjs\""
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"/root/.claude/hooks/context-mode-cache-heal.mjs\""
           }
         ]
       },
@@ -75,14 +59,6 @@
             "statusMessage": "Tracking caveman mode..."
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/userpromptsubmit.mjs\""
-          }
-        ]
       }
     ],
     "PreToolUse": [
@@ -114,65 +90,11 @@
         ]
       },
       {
-        "matcher": "mcp__plugin_context-mode_context-mode__ctx_search|mcp__plugin_context-mode_context-mode__ctx_batch_execute",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/no-subagent-ctx-recall.sh"
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "command": "rtk hook claude"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/pretooluse.mjs\""
-          }
-        ]
-      },
-      {
-        "matcher": "WebFetch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/pretooluse.mjs\""
-          }
-        ]
-      },
-      {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/pretooluse.mjs\""
-          }
-        ]
-      },
-      {
-        "matcher": "Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/pretooluse.mjs\""
-          }
-        ]
-      },
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/pretooluse.mjs\""
           }
         ]
       },
@@ -186,27 +108,6 @@
           }
         ]
       }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash|Read|Write|Edit|NotebookEdit|Glob|Grep|TodoWrite|TaskCreate|TaskUpdate|EnterPlanMode|ExitPlanMode|Skill|Agent|AskUserQuestion|EnterWorktree|mcp__",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/posttooluse.mjs\""
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/root/.claude/plugins/cache/context-mode/context-mode/1.0.162/hooks/precompact.mjs\""
-          }
-        ]
-      }
     ]
   },
   "statusLine": {
@@ -215,7 +116,6 @@
   },
   "enabledPlugins": {
     "caveman@caveman": true,
-    "context-mode@context-mode": true,
     "gopls-lsp@claude-plugins-official": true,
     "codex@openai-codex": true
   },
@@ -224,12 +124,6 @@
       "source": {
         "source": "github",
         "repo": "JuliusBrussee/caveman"
-      }
-    },
-    "context-mode": {
-      "source": {
-        "source": "github",
-        "repo": "mksglu/context-mode"
       }
     },
     "openai-codex": {
