@@ -56,6 +56,10 @@ Wrong-confident costs more than slow-verified. Cheap move (guess) vs correct mov
 ## Quality over speed
 - First working solution = draft, not answer. Don't ship quickest hack when clean
   fix costs a little more. Proper fix much bigger → name both, user chooses.
+- Satu opsi lambat/buntu → enumerate opsi sejenis termurah DULU sebelum ganti
+  metode/arsitektur. Jangan eskalasi strategi karena satu jalan macet sebelum cek
+  sibling termurah. (Bug: `MIN(visit)` lambat → langsung lompat PK-edge tanpa cek
+  kolom date lain; ada `created` indexed = langkah pertama yg kelewat.)
 - Every line justifies its existence. No "might be useful" abstraction. No
   over-engineering (also a shortcut).
 - Respect architecture — code in the layer that owns the concern, not where
