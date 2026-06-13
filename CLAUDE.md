@@ -98,14 +98,19 @@ ringkasan; context subagent dibuang saat return. Yang dihemat = token MAIN (berl
 bukan token total (subagent juga makan token). Jadi untung HANYA kalau raw besar +
 nempel lama.
 
-Judgment main-agent, bukan paksa. Ragu → kerja langsung (default aman). Tiered:
+Judgment main-agent, bukan paksa. Ragu → kerja langsung (default aman). Pisahkan
+FETCH (cari/baca/query, ga butuh reason) dari REASON (korelasi, hipotesis, putusan).
+`haiku-*` = FETCH only — jangan kasih kerja reason ke haiku (model kecil, hasil cacat).
+Tiered:
 
-- **Offload baca/cari (1 sudut, sedang)** → spawn `Explore` (1 level, ga nested).
-  Banyak file ke-glob / file panjang tapi cuma butuh kesimpulan. Murah.
-- **Gather berat multi-sudut** → spawn `plan-orchestrator` (`model=opus`, nested).
-  Butuh fan-out banyak haiku + reasoning Opus atas hasil mentah gabungan.
+- **Fetch 1 sudut, sedang** → spawn `Explore` (1 level) atau 1 `haiku-explorer`/`haiku-bash`.
+  Banyak file ke-glob / file panjang, cuma butuh kesimpulan kecil. Murah.
+- **Reason multi-sudut (ad-hoc, di luar skill)** → spawn `recon-orchestrator` (nested).
+  Default `model=sonnet`; `model=opus` kalau korelasi/arsitektur berat. Dia fan-out haiku
+  fetch, reason sendiri, balik jawaban+citations. Reason kompleks JANGAN dilempar ke
+  `haiku-explorer` — itu fetch-only.
 - **Kerja plan/fix/impl terstruktur** → skill `/investigate`, `/fix-plan`, `/impl-plan`
-  (udah punya pola orchestrator sendiri). Jangan duplikat di sini.
+  (pakai `plan-orchestrator` `model=opus` internal). Jangan duplikat di sini.
 
 Kerja LANGSUNG (skip delegasi) kalau salah satu:
 - Baca/edit ≤3 file, scope jelas.
