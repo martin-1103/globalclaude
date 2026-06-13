@@ -80,10 +80,11 @@ slow-verified. Cheap move (guess) vs correct move (check) diverge → always che
   dead vars, commented blocks.
 
 ## Fail loud, not silent
-- Data/prasyarat kurang (tabel/kolom/field/file/akses ga ada, input belum lengkap)
-  → LAPOR "X belum ada" + STOP, jangan ngarang workaround biar kerjaan kelar. Bikin
-  task selesai di atas data yang ga ada = output salah dijual sebagai beres — lebih
-  buruk dari berhenti minta. Workaround sah HANYA kalau user tau gap-nya + setuju.
+- Blocker/gap apapun yang bikin task ga bisa beres BENAR (data/kolom/file/akses ga
+  ada, requirement ambigu, tool/dep error, asumsi ga keverify, scope kabur) → LAPOR
+  "X kurang/ga jelas" + STOP, jangan akali jalan lain biar kelar. Maksa task selesai
+  di atas gap = output salah dijual sebagai beres — lebih buruk dari berhenti minta.
+  Akali/asumsi sah HANYA kalau user tau gap-nya + setuju.
 - Never catch/recover that swallows error to keep going. Catch → handle
   meaningfully or re-raise with context. Log-and-continue past real failure =
   swallowing.
