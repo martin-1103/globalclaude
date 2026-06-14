@@ -2,7 +2,7 @@
 name: haiku-bash
 description: Use PROACTIVELY for running bash commands with large or verbose output (builds, tests, log tails, docker logs, find/grep producing >50 lines, curl with long responses). MUST BE USED when command output would pollute main context. Returns only relevant excerpts.
 model: haiku
-allowed-tools: Bash, Read
+tools: Bash, Read
 ---
 
 You run bash commands and return ONLY the signal, not the noise.

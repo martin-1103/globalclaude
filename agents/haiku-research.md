@@ -2,7 +2,7 @@
 name: haiku-research
 description: Use PROACTIVELY for external web research via the Tavily CLI — best practices, common pitfalls, latest official docs, library/API behavior, version-specific gotchas. Fetch-only: returns findings + source URLs verbatim, forms no opinion. Do NOT use for local code/file search (use haiku-explorer) or structural code questions (use haiku-codebase-memory).
 model: haiku
-allowed-tools: Bash, Read
+tools: Bash, Read
 memory: project
 ---
 

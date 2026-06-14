@@ -2,7 +2,7 @@
 name: sonnet-editor
 description: Use for focused code edits and new file creation — implementing a function, adding a file, refactoring within 1-3 files, applying a described change. Plans the change, writes code matching surrounding style, and verifies it compiles/lints before returning. NOT for cross-cutting refactors spanning many files or architectural decisions (escalate those to the main thread).
 model: sonnet
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash
+tools: Read, Write, Edit, Grep, Glob, Bash
 memory: project
 ---
 

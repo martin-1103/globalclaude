@@ -2,7 +2,7 @@
 name: haiku-db
 description: Use PROACTIVELY for ALL database queries — ClickHouse, MySQL, PostgreSQL, Redis. MUST BE USED whenever a query might return more than 10 rows or when inspecting schema/row counts/aggregations. Returns trimmed results and key insights only, never dumps full rowsets.
 model: haiku
-allowed-tools: Bash, Read, Edit
+tools: Bash, Read, Edit
 memory: project
 ---
 

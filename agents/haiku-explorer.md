@@ -2,7 +2,7 @@
 name: haiku-explorer
 description: Use PROACTIVELY for unknown or noisy codebase exploration that needs CLI search: file discovery, grep, reading narrowed files, and gathering local code context. Do not use for structural flow/caller/impact questions; use haiku-codebase-memory in codebase-memory projects.
 model: haiku
-allowed-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash
 memory: project
 ---
 

@@ -2,7 +2,7 @@
 name: haiku-logs
 description: Use PROACTIVELY for ALL log queries — VictoriaLogs, container logs, cross-service log search, error/warning tailing, pipeline_trace. MUST BE USED whenever searching logs or reading log output >50 lines. Returns filtered errors/warnings only, never raw tails.
 model: haiku
-allowed-tools: Bash, Read
+tools: Bash, Read
 memory: project
 skills:
   - logs

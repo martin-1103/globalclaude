@@ -2,7 +2,7 @@
 name: opus-coder
 description: Use for HEAVY or cross-cutting code work that exceeds a focused edit — changes spanning 4+ files, non-trivial algorithms, concurrency/locking, schema or API-contract changes, or edits where getting the design wrong is expensive. For a focused 1-3 file edit with a clear shape, prefer sonnet-editor. For purely mechanical edits (rename, format), prefer a direct edit. This agent reasons hard before writing and verifies.
 model: opus
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash
+tools: Read, Write, Edit, Grep, Glob, Bash
 memory: project
 ---
 

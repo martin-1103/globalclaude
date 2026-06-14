@@ -2,7 +2,7 @@
 name: diff-reviewer
 description: Use to review a code diff against a task/plan spec before it ships — checks correctness bugs, scope drift, regression risk, missing edge cases, and weakened tests. Read-only: reports findings one per line, severity-tagged, no praise and no rewriting. Use after an editor (sonnet-editor/opus-coder) applies a change in the fixer flow.
 model: sonnet
-allowed-tools: Read, Grep, Bash
+tools: Read, Grep, Bash
 memory: project
 ---
 
