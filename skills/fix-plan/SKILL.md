@@ -86,7 +86,10 @@ contract, and BLOCKED protocol — do not re-paste them here.)_
 conversation; it needs everything spelled out):
 
 1. **Incident summary** — root cause + suggested fix option(s) verbatim from the incident
-   report (copy the relevant paragraphs, don't paraphrase).
+   report (copy the relevant paragraphs, don't paraphrase). **If the report has a `## Code
+   map`, paste it verbatim** and label it "starting graph — LEAD, re-verify still-live, trace
+   only the fix delta beyond these edges." The orchestrator sees none of the conversation, so
+   an unpasted code map is invisible to it.
 2. **Codebase-memory project** — always `www-wwwroot-gass-be`; pass it explicitly so the
    orchestrator's haiku spawns use the right project graph.
 3. **Slug + scratch path** — the slug you've chosen for this plan run and the scratch file
@@ -113,7 +116,13 @@ conversation; it needs everything spelled out):
 
 Read the incident report given (path arg, or the newest `project-docs/incidents/*.md`).
 Extract verbatim: **root cause, suggested fix option(s), evidence (`file:line`),
-blast radius, open questions, status.**
+blast radius, code map (if present), open questions, status.**
+
+- If the incident has a **`## Code map`** section, carry it into the Phase 1 spawn brief as
+  the **starting graph** — the orchestrator narrows its `trace_path` to the *fix delta*
+  instead of re-tracing the whole region from zero. It is a **LEAD, not ground truth**:
+  Phase 1 still re-verifies still-live + traces what the map doesn't cover (see Phase 1).
+  No code map → Phase 1 traces from scratch as before.
 
 - If status is **not** `root cause confirmed` → warn the user: the cause is suspected,
   not confirmed. Offer to run `/investigate` deeper first. Planning on a shaky cause
@@ -136,6 +145,11 @@ fix is a trivial local change; med/high → run all). **Mandatory for med/high:*
   FIX**, not the bug: `trace_path(<fn to change>, mode=calls, direction=both,
   risk_labels=true)` — who calls the function you'll change, what contract/signature is
   shared, what breaks if it changes. `mode=cross_service` if the fix crosses a boundary.
+  **If the incident carried a `## Code map`:** treat it as the starting graph — still run
+  (a) still-live (the map is a LEAD; code may have moved), but narrow (b) to the **fix
+  delta** the map doesn't already cover (functions the chosen approach adds/touches beyond
+  the recorded edges). Don't blindly re-trace edges the map already lists — confirm they're
+  still live and move on. The map saves the re-discovery, not the verification.
 - `haiku-explorer` — **domain pass (mandatory unless pure infra):** read
   `project-docs/project/` (business logic, glossary) + relevant `project-docs/decisions/`
   (ADRs). The fixer must NOT be the first to see a business constraint.

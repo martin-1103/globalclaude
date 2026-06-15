@@ -100,6 +100,7 @@ a prior run was cut off mid-investigation — read it and resume from the last p
 recorded (signature table / label / hypothesis). Do NOT re-gather from zero.
 
 Before gathering anything new, check if this happened before:
+- **Read `project-docs/incidents/INDEX.md` (L1) FIRST** if it exists — one line per past incident, grouped by service. Scan for the symptom's service/subsystem; open only matching incident `.md` (L2) for the full RCA, then drill to code (L3). A prior RCA often means: do NOT re-investigate from scratch. (No INDEX.md → grep `project-docs/incidents/` directly.)
 - `ctx_search(sort: "timeline", queries: ["<symptom keywords>", "<service name> error"])` — prior incidents, decisions, fixes from session memory.
 - Skim `MEMORY.md` index for related incident notes.
 
@@ -257,6 +258,10 @@ RCA fails (stopping at a symptom, and confirmation bias):
    touches shared state on multiple paths, say so in the report's Suggested fix section
    and flag what to watch after rollout.
 
+   **Retain the edges for the report's Code map.** The caller/callee/contract edges you
+   just traced here (and in Phase 2) are the graph `/fix-plan` would otherwise re-trace
+   from zero. Keep them — Phase 4 records them as `## Code map` (`file:line` + name only).
+
 Then state the root cause in one sentence, backed by:
 - **Evidence**: `file:line` of the bug, the exact log line(s), the numbers.
 - **Mechanism**: why this code/config produces this symptom.
@@ -277,6 +282,9 @@ context; create dir if absent). Structure:
 - **Date**: <date>  **Service**: <svc>  **Severity**: <high/med/low>
   - high = service down or data loss/corruption; med = degraded/partial; low = cosmetic/no user impact
 - **Status**: root cause confirmed | suspected | unresolved
+  - lifecycle: starts here (diagnosed). When a fix ships + verifies, `/fixer` updates this to
+    `FIXED (applied <date>, commit <hash>)`. Use `ARCHIVED (<reason>)` for benign/superseded/stale.
+    The index (L1) groups OPEN vs FIXED/ARCHIVED so closed incidents stop cluttering investigation.
 
 ## Symptom
 <what was observed — quote errors/numbers exactly>
@@ -298,6 +306,20 @@ directly produced the symptom) and root (what made that condition possible)>
 ## Blast radius
 <affected rows / requests / users — upstream trigger + downstream impact>
 
+## Code map (traced — LEAD for /fix-plan, re-verify before use)
+<!-- Already traced in Phase 2 (bug region) + Phase 3 (fix blast-radius). Record it here so
+fix-plan starts from the known graph instead of re-tracing from zero. `file:line` + name ONLY
+— never source snippets, never the full graph (that bloats the report). This is a LEAD, not
+ground truth: code can move before the fix runs, and the fix may touch functions not traced
+here. fix-plan re-verifies (still-live + the fix delta) before relying on it. -->
+- target fn(s): `path/file.go:NN funcName()` — code the suggested fix will change
+- callers (inbound): `path/a.go:NN caller()`, `path/b.go:NN caller2()`
+- calls down (outbound): `pkg.Thing() path/c.go:NN`
+- shared contract: `TypeOrSig` (path/d.go:NN) — what breaks if the signature changes
+- cross-service: <route/channel if the fix crosses a boundary, else "none">
+<!-- If the suggested fix's target isn't pinned yet, record the bug-region graph instead and
+say so on the first line — a bug-region map is still a head start, just label it honestly. -->
+
 ## Suggested fix
 <concrete change — NOT applied yet, leave for approval>
 
@@ -305,7 +327,10 @@ directly produced the symptom) and root (what made that condition possible)>
 <anything unconfirmed>
 ```
 
-After the report is written, **delete the scratch handoff file**
+After the report is written, **regenerate the incident index (L1)** so the new RCA is
+discoverable next session:
+`python3 ~/globalclaude/scripts/gen_incident_index.py <project-dir>`
+(use the project root, e.g. the repo cwd). Then **delete the scratch handoff file**
 (`project-docs/incidents/.<slug>-scratch.md`) — its content is now folded into the
 incident report; leaving it is an orphan. If the investigation ended BLOCKED/unresolved,
 keep the scratch file and note its path in `## Open questions` so a respawn can resume.
