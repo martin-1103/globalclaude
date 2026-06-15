@@ -68,6 +68,38 @@ slow-verified. Cheap move (guess) vs correct move (check) diverge → always che
 - Localized fix over architectural unless task asks for redesign. Flag the bigger
   issue; don't unilaterally do it.
 
+## Code search — pilih tool by jenis pertanyaan
+- Konsep/semantic ("cari logic yg handle X", ga tau nama/file) → claude-context
+  `search_code(path, query)`. Repo HARUS ke-index dulu (`index_codebase`); blm index →
+  index dulu atau pakai jalan lain. Auto-sync tiap 5m (edit → ≤5m fresh). Milvus :19530.
+- Struktural (who-calls, impact, call chain, dead code) → codebase-memory graph. Exact.
+- String/nama persis / file → grep / haiku-explorer. Termurah.
+Urutan murah→mahal: grep < graph < semantic. Pakai semantic HANYA pas nama/string ga tau.
+
+## Incident memory — jangan investigasi ulang dari nol
+Project dengan `project-docs/incidents/` = punya RCA temuan lama. JANGAN telusur dari nol:
+- **Sebelum investigasi error/anomali**: ada `project-docs/incidents/INDEX.md` (L1) → BACA dulu.
+  Scan service/subsystem + judul yang match symptom → buka incident `.md` (L2, RCA penuh) →
+  drill ke kode (L3, file:line di RCA). Ga ada INDEX → grep `project-docs/incidents/`.
+- **Selesai investigasi** → tulis 1 incident `.md` (Symptom→Timeline→Root cause→Evidence→Fix),
+  lalu regen index: `python3 ~/globalclaude/scripts/gen_incident_index.py <project-dir>`.
+- Skill `/investigate` udah otomasi ini (Phase 0 baca L1, Phase 4 regen). Manual investigate →
+  ikutin alur sama.
+
+## Auto-memory hygiene
+Memory dir `~/.claude/projects/-root--claude/memory/`: `MEMORY.md` = L1 index, ke-inject tiap
+session (= pajak token, jaga ramping); file fakta = L2, lazy-load. Musuh = index kembung.
+- **Simpan diam, JANGAN nawarin.** Lolos gate → tulis + diem; gagal → skip senyap. Gate (dua wajib):
+  (a) ga ke-derive dari kode/git/CLAUDE.md, (b) kepake lintas-session. Tipe `user`/`feedback`/
+  `project`/`reference`; feedback+project wajib **Why** + **How to apply**.
+- **Consolidate, bukan append.** File baru → cek existing topik sama dulu → UPDATE. Kontradiksi:
+  baru override lama (buang lama). Link `[[slug]]`. Tanggal absolut. Recall ref kode → verify ada.
+- **Sweep** (`memory-sweep.sh`, SessionStart) auto-buang pointer mati (backup `.bak`+`.sweep.log`),
+  sisanya di-flag → tangani saat itu: file tanpa pointer (add/hapus), >20 file (merge dup, buang basi).
+- **Tiering** pas index >120 baris (hook flag), JANGAN sebelum: pecah pointer ke `index-<kategori>.md`
+  (L2) by kategori yg NYATA numpuk; L1 nyusut 1 baris/kategori. Tier = partisi, bukan kompresi —
+  yg ngecilin = gate+prune.
+
 ## Quality over speed
 - First working solution = draft, not answer. Don't ship quickest hack when clean
   fix costs a little more. Proper fix much bigger → name both, user chooses.
