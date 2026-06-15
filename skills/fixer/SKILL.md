@@ -183,3 +183,17 @@ Reply in chat (Bahasa Indonesia, terse):
 - Rollback pointer: where the plan's rollback section is, if prod misbehaves.
 
 Then stop. Don't deploy unless the user asks — shipping to prod is their call.
+
+## Phase 5 — Incident closure (close the loop)
+
+If this plan came from an incident (the plan markdown header has `**Incident**: <link>`),
+close it so it stops showing as open next session:
+1. Read the plan markdown (`project-docs/plans/<slug>.md`) and extract the `**Incident**`
+   link, e.g. `project-docs/incidents/YYYY-MM-DD-<slug>.md`. No incident link → skip this phase.
+2. Update that incident's Status line to mark it fixed (use today's date from context +
+   the commit hash(es) from Phase 3):
+   `- **Status**: FIXED (applied <YYYY-MM-DD>, commit <hash>) — was: <old status>`
+3. Regenerate the incident index so L1 reflects the closure:
+   `python3 ~/globalclaude/scripts/gen_incident_index.py <project-dir>`
+4. Only mark FIXED when work items are actually completed + verified GREEN. Partial/blocked →
+   leave incident open, note remaining gap in the incident's `## Open questions`.
