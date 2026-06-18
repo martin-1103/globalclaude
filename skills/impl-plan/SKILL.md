@@ -25,15 +25,15 @@ execute it safely in parallel without re-deciding anything.
 
 ## Operating rules (inherited from fix-plan)
 
-- **Delegate all gathering — enforced.** The main agent's own Read/Grep/Glob/Bash/
-  codebase-memory calls are blocked by a PreToolUse hook (`main-agent-gather-guard.sh`).
-  Gather through subagents; this keeps main context clean. Subagents:
+- **Bounded `Read` allowed directly in main** for small files (spec/PRD, plan docs,
+  project-docs index) — use offset+limit, keep reads tight. Everything verbose goes through
+  subagents to keep main context clean. Subagents:
   - `haiku-codebase-memory` — trace_path, who-calls-X, impact, find code by symbol.
     **Always pass project `www-wwwroot-gass-be`.**
-  - `haiku-explorer` — read project-docs, find files/patterns, local search; also read
-    the spec/PRD file if one was passed.
+  - `sonnet-explorer` — read project-docs, find files/patterns, local search, semantic code search; also read the spec/PRD file if one was passed.
   - `haiku-research` — Tavily web research: best practice, common pitfalls, latest docs.
-  - `haiku-db` — schema shape, row counts, existing data the feature must coexist with.
+  - `haiku-db` — single known query: schema shape, exact row count, simple aggregate.
+  - `sonnet-db` — multi-step DB investigation: schema discovery, cross-table correlation, iterative filtering when query path unknown upfront.
   - `haiku-logs` / `haiku-bash` — only if you must confirm a runtime fact.
   - `codex:codex-rescue` — adversarial review of the chosen design (gated by risk).
 - **Haiku FETCHES, you DECIDE.** Subagents pull raw signal (snippets, call edges, doc
