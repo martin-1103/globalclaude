@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code statusline — 3 lines
 # Line 1: model · path · branch · sid
-# Line 2: context-window usage (when to /compact) · quota 5h/7d · per-call cache-hit%
+# Line 2: context-window usage (when to /compact) · quota 5h/7d · per-call cache-hit% · tps
 # Line 3: Σ session tokens — cost (= fresh: input+cache_creation, the A/B compare metric)
 #         · cached (cache_read, ~free) · out (output)
 #
@@ -37,6 +37,26 @@ tcr=$(printf '%s' "$input" | jq -r '.context_window.current_usage.cache_read_inp
 ctot=$((tin + tcc + tcr))
 hit=0
 [ "$ctot" -gt 0 ] && hit=$((tcr * 100 / ctot))
+
+# tokens/sec: output_tokens of last assistant / duration from preceding user timestamp
+tps=""
+if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+  tps=$(jq -rn '
+    [inputs | select(.type == "user" or .type == "assistant")] as $m |
+    ($m | length) as $n |
+    if $n < 2 then ""
+    else
+      $m[$n-1] as $last |
+      if $last.type != "assistant" then ""
+      else
+        $m[$n-2] as $prev |
+        (($last.timestamp | fromdateiso8601) - ($prev.timestamp | fromdateiso8601)) as $dur |
+        ($last.message.usage.output_tokens // 0) as $out |
+        if $dur > 0.5 and $out > 0 then ($out / $dur | round | tostring) else "" end
+      end
+    end
+  ' "$transcript" 2>/dev/null)
+fi
 
 # cumulative session totals from transcript (mtime-cached to avoid re-scan)
 # cost = input + cache_creation (fresh, burns quota) ; cached = cache_read ; out = output
@@ -105,13 +125,15 @@ line1="${C_CYAN}${model}${C_RESET} ${D} ${dir}"
 [ -n "$branch" ] && line1="${line1} ${D} ${C_GREEN}⎇ ${branch}${C_RESET}"
 [ -n "$session" ] && line1="${line1} ${D} ${C_DIM}${session}${C_RESET}"
 
-# line2: context usage + quota + per-call hit
+# line2: context usage + quota + per-call hit + tps
 ctxseg="${ctx_color}ctx [${bar}] ${cwp}% ${cwused_k}/${cwmax_k}${C_RESET}"
 q=""
 [ -n "$q5h" ] && q="5h:$(qcol "$q5h")"
 [ -n "$q7d" ] && q="${q:+$q }7d:$(qcol "$q7d")"
 [ -z "$q" ] && q="${C_DIM}quota:--${C_RESET}"
-line2="${ctxseg} ${D} ${q} ${D} hit:${hit}%"
+tpsseg="${C_DIM}--${C_RESET}"
+[ -n "$tps" ] && tpsseg="${C_CYAN}${tps}t/s${C_RESET}"
+line2="${ctxseg} ${D} ${q} ${D} hit:${hit}% ${D} ${tpsseg}"
 
 # line3: cumulative — cost highlighted (compare metric)
 line3="${C_DIM}Σ${C_RESET} ${C_BOLD}${C_YELLOW}cost ${cost_k}${C_RESET} ${D} ${C_GREEN}cached ${cached_k}${C_RESET} ${D} ${C_DIM}out ${out_k}${C_RESET}"

@@ -11,24 +11,19 @@ by evidence** (file:line + numbers + log lines), then an incident report. Run
 autonomously through all phases — stop to ask only when blocked (missing access,
 ambiguous target service).
 
-> **Two-agent split — read the "Execution model" section below BEFORE acting.** This skill
-> runs across TWO agents: the **main agent** (Phase 0, 3, 4, 5) and a **nested Opus
-> orchestrator** you spawn for the gather-heavy Phase 1+2. "You" means whichever agent owns
-> the current phase. Do NOT run Phase 1+2 in main context — spawn the orchestrator. The
-> per-phase headers tag which agent owns them.
+> **Flat flow — no nested orchestrator.** This skill runs in one agent. Gather-heavy
+> phases still fan out to narrow `haiku-*` fetchers, but there is no intermediate
+> `plan-orchestrator` owner. "You" below always means this skill's current agent.
 
 ## Operating rules
 
-- **Delegate all gathering — enforced, not optional.** The main agent's own
-  Read/Grep/Glob/Bash/codebase-memory calls are blocked by a PreToolUse hook
-  (`main-agent-gather-guard.sh`) — direct gather is denied. Gather through subagents;
-  this also keeps main context clean. Subagents:
+- **Delegate large gathering to subagents.** Bounded `Read` (with offset+limit) is allowed directly in main for small files (INDEX.md, incident `.md`, scratch files) — these are cheap and don't bloat context. Everything verbose goes through subagents to keep main context clean. Subagents:
   - `haiku-logs` — service/container logs, error tailing, crash traces, request tracing.
   - `haiku-db` — ClickHouse / MySQL / Redis queries, row counts, parity checks.
   - `haiku-codebase-memory` — who-calls-X, trace_path, impact analysis, find the code
     behind an error string. **Always pass project `www-wwwroot-gass-be`** so the agent
     does not guess the project.
-  - `haiku-explorer` — file/symbol/pattern discovery when the code graph misses.
+  - `sonnet-explorer` — file/symbol/pattern discovery when the code graph misses.
   - `haiku-bash` — any other verbose shell (docker ps, service status, disk, builds).
 - **Haiku FETCHES, you REASON — keep the line sharp.** Subagents are cheap fetchers:
   they pull raw signal (log lines, row counts, query text, call edges) and return it
@@ -54,53 +49,21 @@ ambiguous target service).
   Don't list five guesses — pursue the strongest, fall back only if killed. The sole
   exception is Deep mode (below), which is explicitly multi-hypothesis.
 
-## Execution model — hybrid nested orchestrator
+## Execution model — flat main-agent flow
 
-Gather-heavy correlation phases run **inside a nested Opus orchestrator** so the raw
-fan-out never touches main context. Decision + user-interaction phases stay in **main**.
-Split is fixed:
-
-| Phase | Runs where | Why |
-|---|---|---|
-| 0 Recall | main | cheap `ctx_search`, no fan-out |
-| 1 Triage | **orchestrator** | wide parallel fetch + signature triage |
-| 2A/2B Root cause | **orchestrator** | heavy trace + correlate, no user input mid-phase |
-| Deep mode | **orchestrator** | N-hypothesis fan-out |
-| 3 Confirm | main | judgment + disprove + may need user |
-| 4 Report | main | writes the incident file |
-| 5 Chat / approval | main | only main can ask the user |
-
-**Spawn the orchestrator** — use the dedicated `plan-orchestrator` agent (its system
-prompt already carries the fan-out rules, the output contract, the return contract, and
-the BLOCKED protocol — do NOT re-paste them here). One spawn per gather-heavy phase, or
-one spanning 1→2 if the target is unambiguous:
-
-```
-Agent(subagent_type="plan-orchestrator", model="opus", prompt=<phase brief>)
-```
-
-The phase brief you pass MUST include, since the orchestrator sees none of this
-conversation:
-- The **symptom** to investigate (what/when/which service if known).
-- The **project** to pass to `haiku-codebase-memory` (`www-wwwroot-gass-be`).
-- The **slug** + scratch path `project-docs/incidents/.<slug>-scratch.md` to write.
-- Which phase output you want back (Phase 1 signature table + label-input, OR Phase 2
-  hypothesis + mechanism).
-
-It reasons as Opus, fans out the `haiku-*` fetchers, and returns **decision + raw
-citations + scratch-file path** (the return contract lives in its system prompt). On a
-blocker it returns `BLOCKED: <question>` and you ask the user, then **respawn** it with
-the answer — respawn means its context is gone, only the scratch file survives. Keep
-blockers rare; if a phase needs the user 3×, it belonged in main.
+This skill owns every phase directly. Keep the heavy work cheap by fanning out narrow
+`haiku-*` fetchers in parallel, then reason over their raw returns here. Do not insert
+an intermediate orchestrator. If a blocker needs user input, ask from this skill's main
+loop and continue after the answer; no nested respawn/handoff layer exists.
 
 ## Phase 0 — Recall (cheap, do first)
 
 **Resume check first.** If `project-docs/incidents/.<slug>-scratch.md` already exists,
-a prior run was cut off mid-investigation — read it and resume from the last phase it
-recorded (signature table / label / hypothesis). Do NOT re-gather from zero.
+a prior run was cut off mid-investigation — read it and resume from the last recorded
+phase (signature table / label / hypothesis). Do NOT re-gather from zero.
 
 Before gathering anything new, check if this happened before:
-- **Read `project-docs/incidents/INDEX.md` (L1) FIRST** if it exists — one line per past incident, grouped by service. Scan for the symptom's service/subsystem; open only matching incident `.md` (L2) for the full RCA, then drill to code (L3). A prior RCA often means: do NOT re-investigate from scratch. (No INDEX.md → grep `project-docs/incidents/` directly.)
+- **`Read` `project-docs/incidents/INDEX.md` (L1) FIRST directly in main** (bounded, ~200 lines max) — one line per past incident, grouped by service. Scan for matching service/subsystem+symptom; if found, `Read` the matching incident `.md` (L2, bounded) for full RCA, then drill to code (L3). A prior RCA often means: do NOT re-investigate from scratch. (No INDEX.md → `Read` a directory listing via Bash `ls project-docs/incidents/` directly.)
 - `ctx_search(sort: "timeline", queries: ["<symptom keywords>", "<service name> error"])` — prior incidents, decisions, fixes from session memory.
 - Skim `MEMORY.md` index for related incident notes.
 
@@ -108,11 +71,9 @@ If a prior fix matches the symptom, verify it still applies before re-investigat
 
 ## Phase 1 — Triage (parallel gather, then classify)
 
-> Runs inside the nested Opus orchestrator (see Execution model). The orchestrator
-> fans out the haiku below, then returns the signature table + raw citations to main.
-> **Main makes the classification call** — it is the routing decision and the one spot
-> a user may be asked (ambiguous target). If the target is ambiguous, the orchestrator
-> returns `BLOCKED` instead of guessing.
+> Run this phase directly in this skill. Fan out the haiku below, collect their raw
+> citations, then make the classification call here. If the target is ambiguous, stop
+> and ask the user instead of guessing.
 
 Pin down: **which service, what symptom, when did it start, blast radius.**
 
@@ -166,8 +127,7 @@ proceed to Phase 2 without a label.**
 
 ## Phase 2A — Runtime root cause
 
-> Runs inside the orchestrator. It owns the trace+correlate loop end-to-end (no user
-> input needed mid-phase), then returns hypothesis + mechanism + raw citations to main.
+> Run this phase directly in this skill. Own the trace+correlate loop end-to-end here.
 
 1. From the log, extract the exact error string + top stack frame / file:line.
 2. Map error → code via `haiku-codebase-memory`: `search_code("<error string>")` or
@@ -185,8 +145,7 @@ proceed to Phase 2 without a label.**
 
 ## Phase 2B — Data anomaly root cause
 
-> Runs inside the orchestrator (same contract as 2A): owns the quantify+locate+map loop,
-> returns hypothesis + mechanism + raw citations to main.
+> Run this phase directly in this skill. Own the quantify+locate+map loop here.
 
 1. Quantify precisely with `haiku-db`: expected vs actual counts, the exact
    rows/keys that diverge, the time window.
@@ -220,11 +179,9 @@ How deep mode runs (parallel haiku fan-out, stays flat):
 
 ## Phase 3 — Confirm root cause
 
-> Runs in **main**, over the orchestrator's returned citations. This is the disprove
-> pass — it must see raw evidence, not just the orchestrator's conclusion. If a needed
-> fact is missing, spawn a fresh narrow **haiku** for that one fact — a single confirm is
-> a haiku call, NOT a nested orchestrator (orchestrator is for multi-angle fan-out only;
-> spawning opus to confirm one DB row wastes a boot). Do not trust an unbacked claim.
+> Run this disprove pass directly in this skill over the raw citations you already
+> gathered. If a needed fact is missing, spawn a fresh narrow **haiku** for that one
+> fact. Do not trust an unbacked claim.
 
 Before locking the root cause, answer two mandatory questions — they catch the two ways
 RCA fails (stopping at a symptom, and confirmation bias):

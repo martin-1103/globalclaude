@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # main-agent-gather-guard.sh — PreToolUse(Read|Grep|Glob|Bash|mcp__codebase-memory*)
 #
-# Goal: keep the main Opus thread CLEAN. Raw data gathering (file contents,
+# Goal: keep the main thread CLEAN. Raw data gathering (file contents,
 # search hits, listings, logs, query results, graph dumps) accumulates in the
 # main context — resent every turn — even when each call is small. 5 lines x
-# 50 calls = 250 lines polluting forever. Route ALL gathering to cheap Haiku
-# subagents (isolated context, discarded after). Main = reason/plan/delegate.
+# 50 calls = 250 lines polluting forever. Main agent is dispatcher-only:
+# communicate with the user, then delegate to the right top-level lane.
 #
-# Routing (deny from main → spawn the named subagent):
-#   Read / Grep / Glob               → haiku-explorer
-#   mcp__codebase-memory*            → haiku-codebase-memory
-#   Bash output-producing cmd        → haiku-bash / haiku-logs / haiku-db
+# This hook only detects that a gather came from main. It does NOT infer intent.
+# The deny message therefore points main back to top-level lanes rather than
+# directly to worker agents.
 #
 # Detection (proven in main-agent-edit-guard.sh, live 2026-06-10):
 #   CC flushes tool_use_id into <transcript>/subagents/agent-<id>.jsonl ~100ms
@@ -29,8 +28,8 @@ INPUT=$(cat)
 
 CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-/root/.claude}"
 
-deny() {  # $1 = subagent name
-  jq -nc --arg s "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:("⛔ Raw gather from main thread blocked. Spawn Agent(subagent_type=\"" + $s + "\") to fetch it — its context is isolated and discarded, keeping main clean.")}}'
+deny() {
+  jq -nc '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:"⛔ Dispatcher-only root: raw gather from main thread blocked. Main may only use bounded Read calls (use offset/limit). Full-file Read and other gather should go through the appropriate top-level lane instead (investigate, fix-plan, impl-plan, brainstorm-orchestrator, reviewer/code-reviewer, codebrain-researcher, plan-review-orchestrator, debug-subagent)."}}'
   exit 0
 }
 
@@ -46,17 +45,23 @@ SUB=""
 case "$TOOL" in
   Read)
     FILE=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null || echo "")
+    OFFSET=$(printf '%s' "$INPUT" | jq -r '.tool_input.offset // empty' 2>/dev/null || echo "")
+    LIMIT=$(printf '%s' "$INPUT" | jq -r '.tool_input.limit // empty' 2>/dev/null || echo "")
     # main edits .md/.claude/.planning/project-docs (per edit-guard exemptions) → must Read first
     if [[ "$FILE" == "$CLAUDE_HOME"* || "$FILE" == *.md || "$FILE" == */.claude/* || "$FILE" == */.planning/* || "$FILE" == */project-docs/* ]]; then
       exit 0
     fi
-    SUB="haiku-explorer"
+    # bounded main-thread read is allowed; full-file read is not
+    if [[ -n "$OFFSET" || -n "$LIMIT" ]]; then
+      exit 0
+    fi
+    SUB="agent-explorer"
     ;;
   Grep|Glob)
-    SUB="haiku-explorer"
+    SUB="agent-explorer"
     ;;
   mcp__codebase-memory*)
-    SUB="haiku-codebase-memory"
+    SUB="agent-codebase-memory"
     ;;
   Bash)
     CMD=$(printf '%s' "$INPUT" | jq -r '.command // .tool_input.command // ""' 2>/dev/null || echo "")
@@ -75,23 +80,23 @@ case "$TOOL" in
       second=$(printf '%s' "$seg" | awk '{print $2}')
       case "$head" in
         cat|head|tail|less|more|bat|ls|find|fd|tree|grep|rg|ag|ack|egrep|fgrep|awk|cut|sort|uniq|wc|column|nl|xxd|hexdump|strings)
-          SUB="haiku-bash"; break ;;
+          SUB="agent-bash"; break ;;
         journalctl|kubectl)
-          SUB="haiku-logs"; break ;;
+          SUB="agent-logs"; break ;;
         docker)
-          case "$second" in logs|ps|compose|stats|top) SUB="haiku-logs"; break ;; esac ;;
+          case "$second" in logs|ps|compose|stats|top) SUB="agent-logs"; break ;; esac ;;
         psql|mysql|redis-cli|mongo|mongosh|sqlite3|clickhouse-client)
-          SUB="haiku-db"; break ;;
+          SUB="agent-db"; break ;;
         clickhouse)
-          [[ "$second" == "client" ]] && { SUB="haiku-db"; break; } ;;
+          [[ "$second" == "client" ]] && { SUB="agent-db"; break; } ;;
         go)
-          case "$second" in build|test|vet) SUB="haiku-bash"; break ;; esac ;;
+          case "$second" in build|test|vet) SUB="agent-bash"; break ;; esac ;;
         make)
-          SUB="haiku-bash"; break ;;
+          SUB="agent-bash"; break ;;
         npm|pnpm|yarn)
-          case "$second" in test|run|build|audit|outdated|ls|list) SUB="haiku-bash"; break ;; esac ;;
+          case "$second" in test|run|build|audit|outdated|ls|list) SUB="agent-bash"; break ;; esac ;;
         gh)
-          SUB="haiku-bash"; break ;;
+          SUB="agent-bash"; break ;;
       esac
     done <<< "$SEGS"
     ;;
@@ -110,4 +115,4 @@ esac
 AGENT_ID=$(printf '%s' "$INPUT" | jq -r '.agent_id // ""' 2>/dev/null || echo "")
 [[ -n "$AGENT_ID" ]] && exit 0   # subagent owns this gather → allow
 
-deny "$SUB"
+deny

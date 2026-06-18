@@ -14,14 +14,10 @@ generic wave-based plan executor, not bugfix-only). Run autonomously through the
 stop to ask the user only at the Phase 0 requirement gate, the one Clarify gate (Phase 3),
 or when genuinely blocked.
 
-> **Two-agent split — read the "Execution model" section below BEFORE acting.** This skill
-> runs across TWO agents: the **main agent** (Phase 0, 3, 4, 6, 7, 8) and a **nested Opus
-> orchestrator** you spawn for the gather-heavy Phase 1+2+5. "You" means whichever agent
-> owns the current phase. **Phase 0 stays in main** — it needs the user (requirement gate)
-> and the conversation context only main holds; main must pass the extracted requirement
-> (what/why/scope/acceptance/constraints) INTO the orchestrator's spawn prompt, because the
-> orchestrator cannot see conversation history. Do NOT run Phase 1+2+5 in main context.
-> The per-phase headers tag which agent owns them.
+> **Flat flow — no nested orchestrator.** This skill runs in one agent. Gather-heavy
+> phases still fan out to narrow fetchers, but there is no intermediate `plan-orchestrator`
+> owner. Phase 0 still handles conversation-derived requirements here because this skill
+> already holds that context.
 
 The plan you produce is a **decision document that de-risks the change before anyone
 touches code** — not a coding task. Its quality is judged by whether the fixer can
@@ -56,67 +52,13 @@ execute it safely in parallel without re-deciding anything.
 - **You design, you do not apply.** No Edit/Write to code. The only files you write are the
   plan document and the `.tasks.json` handoff file. Code changes are the fixer's job.
 
-## Execution model — hybrid nested orchestrator
+## Execution model — flat main-agent flow
 
-The gather-heavy phases (1+2) run inside a **nested Opus orchestrator** spawned by main.
-Decision/user/task phases stay in main because they require tools that are main-loop-only.
-
-| Phase | Runs where | Why |
-|---|---|---|
-| 0 — Ingest requirement | **main** | Source of truth is conversation context; requirement gate may need `AskUserQuestion` (main-only) |
-| 1 — Recon + research | **ORCHESTRATOR** | Wide parallel fan-out; Opus reasons over the full recon in one context |
-| 2 — Decide design | **ORCHESTRATOR** | Reasoning continues from Phase 1 in the same context — no context loss between recon and decision |
-| 3 — Clarify | **main** | User gate — `AskUserQuestion` is main-only |
-| 4 — Codex review | **main** | `codex:codex-rescue` spawn is a main-level concern |
-| 5 — Breakdown + write .tasks.json | **ORCHESTRATOR** | Subagents have the `Write` tool; orchestrator writes the durable handoff file directly |
-| 6 — Re-review | **main** | Second Codex pass (high risk) or main self-check |
-| 7 — Write plan + handoff | **main** | Writes the plan markdown and closes the loop |
-
-**Phase 0 nuance:** Phase 0 (Ingest requirement) stays in MAIN because its requirement gate
-may need to ask the user (`AskUserQuestion` is main-only) AND the source of truth is the
-conversation context which the main agent holds. The orchestrator is spawned **for
-Phase 1+2+5**, and main must pass the extracted requirement (what / why / scope / acceptance
-criteria / constraints) into the orchestrator's prompt, since the orchestrator does not see
-the conversation history.
-
-**How to spawn:**
-```
-Agent(
-  subagent_type="plan-orchestrator",
-  model="opus",
-  prompt=<see spawn-prompt brief below>
-)
-```
-The orchestrator reasons as Opus and fans out the `haiku-*` fetchers internally — main
-context stays clean.
-
-(The orchestrator's system prompt carries the fan-out rules, output contract, 3-part return
-contract, and BLOCKED protocol — do not re-paste them here.)
-
-**Spawn-prompt brief — what main MUST pass in (the orchestrator sees NONE of the
-conversation):**
-
-- **Extracted requirement** (from Phase 0): What / Why / Scope IN-OUT / Acceptance criteria
-  / Constraints — verbatim, not a pointer to the conversation.
-- **Phases to run**: Phase 1 (recon + research), Phase 2 (design), Phase 5 (breakdown +
-  write `.tasks.json`).
-- **Project for haiku-codebase-memory**: `www-wwwroot-gass-be`.
-- **Slug + scratch path**: the plan slug and `project-docs/plans/.<slug>-scratch.md`.
-- **Machine-handoff path + EXACT JSON schema** the orchestrator must use when writing
-  `project-docs/plans/<slug>.tasks.json` in Phase 5:
-  ```json
-  {"id":"T1","wave":1,"blockedBy":[],"files":["path/a.go"],"track":"build",
-   "change":"one line what changes","verify":"command that proves THIS item works",
-   "rollback":"how to undo","risk":"low","status":"pending"}
-  ```
-  `track` ∈ `build | test | migration | docs`. `status` always seeded as `"pending"`.
-- **Which output to return**: design decisions + raw citations (Phase 2) AND the breakdown
-  summary (Phase 5). The `.tasks.json` file written in Phase 5 is the durable handoff;
-  main must not write or rewrite it.
-
-**Cleanup:** main deletes the scratch file after Phase 7 writes the real plan (anti-orphan
-rule). If the plan ends BLOCKED/unresolved, keep the scratch file and note its path in the
-plan's Open questions section.
+This skill owns every phase directly. Phase 0 still extracts requirements from this
+conversation context. Keep raw gather cheap by fanning out narrow `haiku-*` fetchers in
+parallel, then reason over their returns here. If a blocker needs user input, ask from
+this skill's main loop and continue after the answer. Write the scratch file and
+`.tasks.json` directly from this skill; no nested handoff layer exists.
 
 ## Phase 0 — Ingest the requirement (the gate fix-plan doesn't have)
 
@@ -150,7 +92,9 @@ Set an initial **RISK level** — it gates Codex usage and editor choice downstr
 
 ## Phase 1 — Recon + research (parallel, then barrier)
 
-> Runs inside the nested Opus orchestrator (see Execution model), seeded with the requirement main extracted in Phase 0. It fans out the haiku below and returns recon + design + raw citations to main; the barrier is internal to the orchestrator. Phase 5 (breakdown + write `.tasks.json`) also runs in this same orchestrator context, after Phase 2.
+> Run this phase directly in this skill, seeded with the requirement extracted in Phase 0.
+> Fan out the haiku below, wait for all returns, then continue only after the full recon
+> is in hand.
 
 Fan out in ONE batch. Scale the set to RISK (low → skip web research + domain read if the
 change is trivially local; med/high → run all). **Mandatory for med/high:**
@@ -185,7 +129,7 @@ partial recon is how plans miss a caller or a constraint.
 
 ## Phase 2 — Decide the design (you reason, do not delegate)
 
-> Runs inside the orchestrator, continuing from Phase 1's recon in the same context. "You" here = the Opus orchestrator. It returns the design + raw citations to main. Phase 5 follows immediately in the same orchestrator context.
+> Run this phase directly in this skill, continuing from Phase 1's recon in the same context.
 
 Synthesize the recon into the core decisions. This is the heart of the skill.
 
@@ -253,7 +197,8 @@ a known-broken design either.
 
 ## Phase 5 — Breakdown (executor-ready, parallel-safe)
 
-> Runs in the ORCHESTRATOR, continuing from Phase 2's design in the same context. The orchestrator has the `Write` tool and writes `project-docs/plans/<slug>.tasks.json` directly before returning. This dissolves the old "TaskCreate is main-only" constraint.
+> Run this phase directly in this skill, continuing from Phase 2's design. This skill
+> writes `project-docs/plans/<slug>.tasks.json` directly before continuing.
 
 Decompose the implementation into **atomic work items** arranged in **waves** (topological
 layers). Items in the same wave have no dependency on each other and are safe to run in

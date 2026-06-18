@@ -12,12 +12,9 @@ the fix — you never apply it**. Execution is the `/fixer` skill's job. Run aut
 through the phases; stop to ask the user only at the one Clarify gate (Phase 3) or when
 genuinely blocked.
 
-> **Two-agent split — read the "Execution model" section below BEFORE acting.** This skill
-> runs across TWO agents: the **main agent** (Phase 0, 3, 4, 6, 7, 8) and a **nested Opus
-> orchestrator** you spawn for the gather-heavy Phase 1+2+5. "You" means whichever agent
-> owns the current phase. Do NOT run Phase 1+2+5 in main context — spawn the orchestrator;
-> it does the recon, the deciding, AND writes the `.tasks.json` breakdown. The per-phase
-> headers tag which agent owns them.
+> **Flat flow — no nested orchestrator.** This skill runs in one agent. Gather-heavy
+> phases still fan out to narrow fetchers, but there is no intermediate `plan-orchestrator`
+> owner. "You" below always means this skill's current agent.
 
 The plan you produce is a **decision document that de-risks the change before anyone
 touches code** — not a coding task. Its quality is judged by whether the fixer can
@@ -25,12 +22,12 @@ execute it safely in parallel without re-deciding anything.
 
 ## Operating rules (inherited from investigate)
 
-- **Delegate all gathering — enforced.** The main agent's own Read/Grep/Glob/Bash/
-  codebase-memory calls are blocked by a PreToolUse hook (`main-agent-gather-guard.sh`).
-  Gather through subagents; this keeps main context clean. Subagents:
+- **Bounded `Read` allowed directly in main** for small files (incident `.md`, plan docs,
+  project-docs index) — use offset+limit, keep reads tight. Everything verbose goes through
+  subagents to keep main context clean. Subagents:
   - `haiku-codebase-memory` — trace_path, who-calls-X, impact, find code by symbol.
     **Always pass project `www-wwwroot-gass-be`.**
-  - `haiku-explorer` — read project-docs, find files/patterns, local search.
+  - `sonnet-explorer` — read project-docs, find files/patterns, local search, semantic code search.
   - `haiku-research` — Tavily web research: best practice, common pitfalls, latest docs.
   - `haiku-db` — count the rows actually affected (needed to size remediation).
   - `haiku-logs` / `haiku-bash` — only if you must re-confirm a runtime fact.
@@ -50,76 +47,21 @@ execute it safely in parallel without re-deciding anything.
 - **You design, you do not apply.** No Edit/Write to code. The only files you write are the
   plan document and the `.tasks.json` handoff. Code changes are the fixer's job.
 
-## Execution model — hybrid nested orchestrator
+## Execution model — flat main-agent flow
 
-Phases split between main and a nested Opus orchestrator to keep main context clean while
-giving the wide parallel fan-out full reasoning power.
-
-| Phase | Runs where | Why |
-|---|---|---|
-| Phase 0 — Ingest | **main** | Light read of incident file; no fan-out needed. |
-| Phase 1 — Recon + research | **ORCHESTRATOR** | Wide parallel fetch → Opus reasons over the raw signal. |
-| Phase 2 — Decide | **ORCHESTRATOR** | Decision continues in the same context as recon — no context seam. |
-| Phase 3 — Clarify | **main** | `AskUserQuestion` is main-loop-only; orchestrator cannot reach the user. |
-| Phase 4 — Codex review | **main** | `codex:codex-rescue` spawn is a main-loop call. |
-| Phase 5 — Breakdown + write .tasks.json | **ORCHESTRATOR** | Subagents have Write; orchestrator writes the handoff file directly. |
-| Phase 6 — Re-review | **main** | Self-check or second Codex pass, both in main. |
-| Phase 7 — Write plan + handoff | **main** | File write + final gate; orchestrator is done by here. |
-
-**How to spawn the orchestrator:**
-
-```python
-Agent(
-    subagent_type="plan-orchestrator",
-    model="opus",
-    prompt=<phase_1_and_2_brief>   # see "Spawn-prompt brief" below
-)
-```
-
-It reasons at Opus level and fans out the `haiku-*` fetchers internally — main context
-stays clean. The spawn is one call; Phases 1, 2, and 5 all complete inside it.
-
-_(The orchestrator's system prompt carries the fan-out rules, output contract, 3-part return
-contract, and BLOCKED protocol — do not re-paste them here.)_
-
-**Spawn-prompt brief — what main MUST include** (the orchestrator sees none of the
-conversation; it needs everything spelled out):
-
-1. **Incident summary** — root cause + suggested fix option(s) verbatim from the incident
-   report (copy the relevant paragraphs, don't paraphrase). **If the report has a `## Code
-   map`, paste it verbatim** and label it "starting graph — LEAD, re-verify still-live, trace
-   only the fix delta beyond these edges." The orchestrator sees none of the conversation, so
-   an unpasted code map is invisible to it.
-2. **Codebase-memory project** — always `www-wwwroot-gass-be`; pass it explicitly so the
-   orchestrator's haiku spawns use the right project graph.
-3. **Slug + scratch path** — the slug you've chosen for this plan run and the scratch file
-   path `project-docs/plans/.<slug>-scratch.md` where the orchestrator must write its recon
-   dump.
-4. **Tasks handoff path + schema** — the exact path `project-docs/plans/<slug>.tasks.json`
-   and the canonical JSON schema the orchestrator must use when writing the breakdown in
-   Phase 5:
-   ```json
-   {"id":"T1","wave":1,"blockedBy":[],"files":["path/a.go"],
-    "track":"forward","change":"one line what changes",
-    "verify":"command RED now GREEN after","rollback":"how to undo",
-    "risk":"low","status":"pending"}
-   ```
-5. **Expected return** — explicitly ask for: (a) the decision (approach, fix level, tracks)
-   and (b) the breakdown confirmation (wave count, item count, tasks file path written).
-
-**Cleanup:** after Phase 7 writes the real plan, main **deletes**
-`project-docs/plans/.<slug>-scratch.md` (anti-orphan rule). If the run ended
-`BLOCKED`/unresolved, keep the scratch file and note its path under the plan's
-**Open questions** section so the next session can pick up.
+This skill owns every phase directly. Keep raw gather cheap by fanning out narrow
+`haiku-*` fetchers in parallel, then reason over their returns here. If a blocker needs
+user input, ask from this skill's main loop and continue after the answer. Write the
+scratch file and `.tasks.json` directly from this skill; no nested handoff layer exists.
 
 ## Phase 0 — Ingest the incident
 
-Read the incident report given (path arg, or the newest `project-docs/incidents/*.md`).
-Extract verbatim: **root cause, suggested fix option(s), evidence (`file:line`),
-blast radius, code map (if present), open questions, status.**
+**Session-context check first.** Run `ctx_search(sort: "timeline", queries: ["investigate root cause", "incident code map", "trace_path result"])` — if `/investigate` ran in this session, the trace edges, file:line facts, and code map are already in session memory. If found → carry them directly into Phase 1 as the starting graph; **skip re-trace entirely** for edges already confirmed this session (only verify still-live if deploy happened between investigate and fix-plan). If not found → proceed with full Phase 1 recon below.
+
+`Read` the incident report (path arg, or newest `project-docs/incidents/*.md`) directly in main (bounded). Extract verbatim: **root cause, suggested fix option(s), evidence (`file:line`), blast radius, code map (if present), open questions, status.**
 
 - If the incident has a **`## Code map`** section, carry it into the Phase 1 spawn brief as
-  the **starting graph** — the orchestrator narrows its `trace_path` to the *fix delta*
+  the **starting graph** — narrow `trace_path` to the *fix delta*
   instead of re-tracing the whole region from zero. It is a **LEAD, not ground truth**:
   Phase 1 still re-verifies still-live + traces what the map doesn't cover (see Phase 1).
   No code map → Phase 1 traces from scratch as before.
@@ -135,7 +77,8 @@ blast radius, code map (if present), open questions, status.**
 
 ## Phase 1 — Recon + research (parallel, then barrier)
 
-> Runs inside the nested Opus orchestrator (see Execution model). It fans out the haiku below and returns the recon + decision + raw citations to main; the barrier is internal to the orchestrator.
+> Run this phase directly in this skill. Fan out the haiku below, wait for all returns,
+> then continue only after the full recon is in hand.
 
 Fan out in ONE batch. Scale the set to RISK (low → skip web research + domain read if the
 fix is a trivial local change; med/high → run all). **Mandatory for med/high:**
@@ -145,15 +88,15 @@ fix is a trivial local change; med/high → run all). **Mandatory for med/high:*
   FIX**, not the bug: `trace_path(<fn to change>, mode=calls, direction=both,
   risk_labels=true)` — who calls the function you'll change, what contract/signature is
   shared, what breaks if it changes. `mode=cross_service` if the fix crosses a boundary.
+  **If session-context check (Phase 0) found live trace edges from this session:** skip (b)
+  for edges already in context — only run (a) still-live + (b) for the fix delta not yet covered.
   **If the incident carried a `## Code map`:** treat it as the starting graph — still run
   (a) still-live (the map is a LEAD; code may have moved), but narrow (b) to the **fix
-  delta** the map doesn't already cover (functions the chosen approach adds/touches beyond
-  the recorded edges). Don't blindly re-trace edges the map already lists — confirm they're
-  still live and move on. The map saves the re-discovery, not the verification.
-- `haiku-explorer` — **domain pass (mandatory unless pure infra):** read
+  delta** the map doesn't already cover. Don't blindly re-trace edges the map already lists.
+- `sonnet-explorer` — **domain pass (mandatory unless pure infra):** read
   `project-docs/project/` (business logic, glossary) + relevant `project-docs/decisions/`
   (ADRs). The fixer must NOT be the first to see a business constraint.
-- `haiku-explorer` — **pitfalls pass (mandatory):** read `project-docs/tech-pitfalls/<tech>.md`
+- `sonnet-explorer` — **pitfalls pass (mandatory):** read `project-docs/tech-pitfalls/<tech>.md`
   for every tech the fix touches (clickhouse, mysql, go, redis, …). Landmines belong in
   the plan, not discovered mid-execution.
 - `haiku-research` — best practice + common pitfalls + latest official docs for the
@@ -167,7 +110,7 @@ partial recon is how plans miss a caller or a constraint.
 
 ## Phase 2 — Decide (you reason, do not delegate)
 
-> Runs inside the orchestrator, continuing from Phase 1's recon in the same context. "You" here = the Opus orchestrator. It returns the decision + raw citations to main.
+> Run this phase directly in this skill, continuing from Phase 1's recon in the same context.
 
 Synthesize the recon into the core decisions. This is the heart of the skill.
 
@@ -235,7 +178,8 @@ breakdown instead. Don't loop forever; don't proceed on a known-broken approach 
 
 ## Phase 5 — Breakdown (executor-ready, parallel-safe)
 
-> Runs in the **ORCHESTRATOR** (continuing from Phase 2 in the same context). Subagents have the Write tool, so the orchestrator writes the `.tasks.json` handoff file directly — no need to return to main for this step.
+> Run this phase directly in this skill, continuing from Phase 2. This skill writes the
+> `.tasks.json` handoff file directly.
 
 Decompose the fix into **atomic work items** arranged in **waves** (topological layers).
 Items in the same wave have no dependency on each other and are safe to run in parallel;
