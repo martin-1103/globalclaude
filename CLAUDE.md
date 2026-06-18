@@ -160,12 +160,11 @@ FETCH (cari/baca/query, ga butuh reason) dari REASON (korelasi, hipotesis, putus
 `haiku-*` = FETCH only — jangan kasih kerja reason ke haiku (model kecil, hasil cacat).
 Tiered:
 
-- **Fetch 1 sudut, sedang** → spawn `Explore` (1 level) atau 1 `haiku-explorer`/`haiku-bash`.
-  Banyak file ke-glob / file panjang, cuma butuh kesimpulan kecil. Murah.
+- **Fetch 1 sudut, sedang** → spawn `sonnet-explorer` (file/symbol/semantic discovery, bisa nested ke haiku-bash/haiku-codebase-memory) atau `haiku-bash` (shell output). Banyak file ke-glob / file panjang, cuma butuh kesimpulan kecil.
 - **Reason multi-sudut (ad-hoc, di luar skill)** → spawn `recon-orchestrator` (nested).
   Default `model=sonnet`; `model=opus` kalau korelasi/arsitektur berat. Dia fan-out haiku
   fetch, reason sendiri, balik jawaban+citations. Reason kompleks JANGAN dilempar ke
-  `haiku-explorer` — itu fetch-only.
+  `haiku-*` — model kecil, hasil cacat.
 - **Kerja plan/fix/impl terstruktur** → skill `/investigate`, `/fix-plan`, `/impl-plan`
   (pakai `plan-orchestrator` `model=opus` internal). Jangan duplikat di sini.
 
