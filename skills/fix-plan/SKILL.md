@@ -29,7 +29,8 @@ execute it safely in parallel without re-deciding anything.
     **Always pass project `www-wwwroot-gass-be`.**
   - `sonnet-explorer` — read project-docs, find files/patterns, local search, semantic code search.
   - `haiku-research` — Tavily web research: best practice, common pitfalls, latest docs.
-  - `haiku-db` — count the rows actually affected (needed to size remediation).
+  - `haiku-db` — single known query: exact count, row check, simple aggregate to size remediation.
+  - `sonnet-db` — multi-step DB investigation: when you need to discover/correlate data before you know the exact query (schema hunt, cross-table correlation, iterative filtering).
   - `haiku-logs` / `haiku-bash` — only if you must re-confirm a runtime fact.
   - `codex:codex-rescue` — adversarial review of the chosen approach (gated by risk).
 - **Haiku FETCHES, you DECIDE.** Subagents pull raw signal (snippets, call edges, doc

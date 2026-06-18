@@ -19,7 +19,8 @@ ambiguous target service).
 
 - **Delegate large gathering to subagents.** Bounded `Read` (with offset+limit) is allowed directly in main for small files (INDEX.md, incident `.md`, scratch files) — these are cheap and don't bloat context. Everything verbose goes through subagents to keep main context clean. Subagents:
   - `haiku-logs` — service/container logs, error tailing, crash traces, request tracing.
-  - `haiku-db` — ClickHouse / MySQL / Redis queries, row counts, parity checks.
+  - `haiku-db` — single known query: exact count, simple aggregate, row check. Query already clear before spawning.
+  - `sonnet-db` — multi-step DB investigation: schema discovery, cross-table correlation, iterative filtering, data hunt where query path unknown upfront.
   - `haiku-codebase-memory` — who-calls-X, trace_path, impact analysis, find the code
     behind an error string. **Always pass project `www-wwwroot-gass-be`** so the agent
     does not guess the project.
