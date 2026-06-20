@@ -28,13 +28,6 @@ fi
 echo "==> Installing CLI..."
 cd "$REPO_DIR" && uv tool install . --quiet
 
-echo "==> Patching env var names (API_KEY -> FASTCONTEXT_API_KEY etc)..."
-sed -i \
-  -e 's/os\.getenv("API_KEY")/os.getenv("FASTCONTEXT_API_KEY")/g' \
-  -e 's/os\.getenv("BASE_URL")/os.getenv("FASTCONTEXT_BASE_URL")/g' \
-  -e 's/os\.getenv("MODEL")/os.getenv("FASTCONTEXT_MODEL")/g' \
-  "$FACTORY"
-
 echo "==> Setting default max-turns to 12..."
 sed -i 's/default=4/default=12/' "$CLI"
 
@@ -143,9 +136,9 @@ cp "$SCRIPT_DIR/../skills/fastcontext/SKILL.md" "$SKILL_DIR/SKILL.md"
 echo "==> Writing env vars to ~/.bashrc..."
 sed -i '/^export FASTCONTEXT_/d' ~/.bashrc
 cat >> ~/.bashrc << ENVEOF
-export FASTCONTEXT_BASE_URL="$BASE_URL"
-export FASTCONTEXT_API_KEY="$API_KEY"
-export FASTCONTEXT_MODEL="$MODEL"
+export BASE_URL="$BASE_URL"
+export API_KEY="$API_KEY"
+export MODEL="$MODEL"
 ENVEOF
 
 echo ""
