@@ -73,20 +73,21 @@ Decision tree (pakai paling murah yang cukup):
 
 ```
 path/file diketahui?              → Read / grep / rg langsung
-string/nama persis, 1 pattern?    → grep / haiku-explorer
+string/nama persis, 1 pattern?    → grep / rg
 struktural (callers/impact/graph)?→ haiku-codebase-memory  (project harus indexed)
 path unknown, multi-file explore? → fastcontext skill      (model murah, bukan Claude)
-butuh reasoning atas findings?    → sonnet-explorer
 konsep/semantic, nama ga tau?     → claude-context search_code(path, query)
 ```
+
+Flow utama: fastcontext return `file:line` → main agent Read file → main agent reason.
+Reasoning selalu di main agent, bukan subagent.
 
 Detail per tool:
 - **grep/rg** — string/nama persis, 1 dir. Termurah, tanpa spawn.
 - **`fastcontext`** — path/symbol unknown, butuh search→trace→read lintas file. Subprocess
-  model murah; return hanya `file:line` + summary, raw bytes tidak masuk context.
-  SKIP kalau file diketahui, single grep, atau project indexed di graph.
+  model murah; return hanya `file:line` + summary. Main agent HARUS Read file:line hasilnya
+  sebelum reason — jangan reason atas summary fastcontext saja.
 - **`haiku-codebase-memory`** — who-calls, impact, call chain, symbol def. Exact + cepat.
-- **`sonnet-explorer`** — fastcontext kurang, butuh judgment/reasoning atas hasil.
 - **claude-context `search_code`** — konsep/semantic, nama ga tau. Repo harus ke-index
   (`index_codebase`); auto-sync tiap 5m. Milvus :19530. Pakai HANYA pas nama/string ga tau.
 
@@ -175,7 +176,7 @@ FETCH (cari/baca/query, ga butuh reason) dari REASON (korelasi, hipotesis, putus
 `haiku-*` = FETCH only — jangan kasih kerja reason ke haiku (model kecil, hasil cacat).
 Tiered:
 
-- **Fetch 1 sudut, sedang** → spawn `sonnet-explorer` (file/symbol/semantic discovery, bisa nested ke haiku-bash/haiku-codebase-memory) atau `haiku-bash` (shell output). Banyak file ke-glob / file panjang, cuma butuh kesimpulan kecil.
+- **Fetch 1 sudut, sedang** → skill `fastcontext` (file/symbol/semantic discovery, model murah, return file:line) atau `haiku-bash` (shell output). Banyak file ke-glob / file panjang, cuma butuh citations — main agent Read + reason sendiri.
 - **DB query** → `haiku-db` (single known query: count, aggregate, schema shape) atau `sonnet-db` (multi-step: schema discovery, cross-table correlation, query path ga diketahui upfront).
 - **Reason multi-sudut (ad-hoc, di luar skill)** → spawn `recon-orchestrator` (nested).
   Default `model=sonnet`; `model=opus` kalau korelasi/arsitektur berat. Dia fan-out haiku
