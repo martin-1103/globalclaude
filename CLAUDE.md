@@ -68,13 +68,27 @@ slow-verified. Cheap move (guess) vs correct move (check) diverge → always che
 - Localized fix over architectural unless task asks for redesign. Flag the bigger
   issue; don't unilaterally do it.
 
-## Code search — pilih tool by jenis pertanyaan
-- Konsep/semantic ("cari logic yg handle X", ga tau nama/file) → claude-context
-  `search_code(path, query)`. Repo HARUS ke-index dulu (`index_codebase`); blm index →
-  index dulu atau pakai jalan lain. Auto-sync tiap 5m (edit → ≤5m fresh). Milvus :19530.
-- Struktural (who-calls, impact, call chain, dead code) → codebase-memory graph. Exact.
-- String/nama persis / file → grep / haiku-explorer. Termurah.
-Urutan murah→mahal: grep < graph < semantic. Pakai semantic HANYA pas nama/string ga tau.
+## Code search & exploration — pilih tool by jenis pertanyaan
+Decision tree (pakai paling murah yang cukup):
+
+```
+path/file diketahui?              → Read / grep / rg langsung
+string/nama persis, 1 pattern?    → grep / haiku-explorer
+struktural (callers/impact/graph)?→ haiku-codebase-memory  (project harus indexed)
+path unknown, multi-file explore? → fastcontext skill      (model murah, bukan Claude)
+butuh reasoning atas findings?    → sonnet-explorer
+konsep/semantic, nama ga tau?     → claude-context search_code(path, query)
+```
+
+Detail per tool:
+- **grep/rg** — string/nama persis, 1 dir. Termurah, tanpa spawn.
+- **`fastcontext`** — path/symbol unknown, butuh search→trace→read lintas file. Subprocess
+  model murah; return hanya `file:line` + summary, raw bytes tidak masuk context.
+  SKIP kalau file diketahui, single grep, atau project indexed di graph.
+- **`haiku-codebase-memory`** — who-calls, impact, call chain, symbol def. Exact + cepat.
+- **`sonnet-explorer`** — fastcontext kurang, butuh judgment/reasoning atas hasil.
+- **claude-context `search_code`** — konsep/semantic, nama ga tau. Repo harus ke-index
+  (`index_codebase`); auto-sync tiap 5m. Milvus :19530. Pakai HANYA pas nama/string ga tau.
 
 ## Incident memory — jangan investigasi ulang dari nol
 Project dengan `project-docs/incidents/` = punya RCA temuan lama. JANGAN telusur dari nol:
@@ -99,6 +113,7 @@ session (= pajak token, jaga ramping); file fakta = L2, lazy-load. Musuh = index
 - **Tiering** pas index >120 baris (hook flag), JANGAN sebelum: pecah pointer ke `index-<kategori>.md`
   (L2) by kategori yg NYATA numpuk; L1 nyusut 1 baris/kategori. Tier = partisi, bukan kompresi —
   yg ngecilin = gate+prune.
+- **Post-agent eval.** Habis subagent return, jalankan gate: ada fakta non-obvious yang lolos (a)+(b)? → simpan diam. Jangan tunggu end-of-turn — fakta dari subagent sering ga muncul lagi di turn berikut.
 
 ## Quality over speed
 - First working solution = draft, not answer. Don't ship quickest hack when clean
@@ -161,6 +176,7 @@ FETCH (cari/baca/query, ga butuh reason) dari REASON (korelasi, hipotesis, putus
 Tiered:
 
 - **Fetch 1 sudut, sedang** → spawn `sonnet-explorer` (file/symbol/semantic discovery, bisa nested ke haiku-bash/haiku-codebase-memory) atau `haiku-bash` (shell output). Banyak file ke-glob / file panjang, cuma butuh kesimpulan kecil.
+- **DB query** → `haiku-db` (single known query: count, aggregate, schema shape) atau `sonnet-db` (multi-step: schema discovery, cross-table correlation, query path ga diketahui upfront).
 - **Reason multi-sudut (ad-hoc, di luar skill)** → spawn `recon-orchestrator` (nested).
   Default `model=sonnet`; `model=opus` kalau korelasi/arsitektur berat. Dia fan-out haiku
   fetch, reason sendiri, balik jawaban+citations. Reason kompleks JANGAN dilempar ke
