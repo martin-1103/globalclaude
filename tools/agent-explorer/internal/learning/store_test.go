@@ -3,6 +3,8 @@ package learning
 import (
 	"os"
 	"path/filepath"
+	"sync"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,8 +116,9 @@ func TestStaleEntryFreshWhenSnippetStillPresent(t *testing.T) {
 	if err := os.WriteFile(file, []byte("line1\nline2\nwriteJSONError(w, http.StatusUnauthorized, \"missing authorization header\")\nline4\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	windowHash := lineWindowHash(strings.Split("line1\nline2\nwriteJSONError(w, http.StatusUnauthorized, \"missing authorization header\")\nline4\n", "\n"), 3)
 	entry := FeedbackEntry{
-		AcceptedEvidence: []EvidenceRef{{Path: file, LineStart: 3, SnippetProbe: "missing authorization header", Symbol: "Authenticate"}},
+		AcceptedEvidence: []EvidenceRef{{Path: file, LineStart: 3, SnippetProbe: "missing authorization header", SnippetHash: windowHash, Symbol: "Authenticate"}},
 	}
 	if staleEntry("/", entry, ValidationOptions{}) {
 		t.Fatalf("expected fresh entry when snippet still present")
@@ -165,5 +168,59 @@ func TestCompactFeedbackCanDropStale(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("compacted count = %d, want 1", count)
+	}
+}
+
+func TestLineWindowHashEmptyWithoutAnchor(t *testing.T) {
+	if got := lineWindowHash([]string{"a", "b"}, 0); got != "" {
+		t.Fatalf("lineWindowHash without anchor = %q, want empty", got)
+	}
+}
+
+func TestBodyWindowHashUsesLineRange(t *testing.T) {
+	lines := strings.Split("a\nbody-one\nbody-two\nz\n", "\n")
+	if got := bodyWindowHash(lines, 2, 3); got == "" {
+		t.Fatalf("expected non-empty body hash")
+	}
+}
+
+func TestSymbolResolveDistanceDefault(t *testing.T) {
+	opts := ValidationOptions{}
+	if opts.LineDistance != 0 {
+		t.Fatalf("expected zero-value line distance before defaulting")
+	}
+	if opts.LineDistance <= 0 {
+		opts.LineDistance = 40
+	}
+	if opts.LineDistance != 40 {
+		t.Fatalf("line distance = %d, want 40", opts.LineDistance)
+	}
+}
+
+func TestEvidenceFreshUsesValidationCache(t *testing.T) {
+	validationCache = sync.Map{}
+	validationCacheTTL = time.Hour
+	base := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	validationNow = func() time.Time { return base }
+	t.Cleanup(func() {
+		validationCache = sync.Map{}
+		validationCacheTTL = 5 * time.Minute
+		validationNow = func() time.Time { return time.Now().UTC() }
+	})
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cached.go")
+	if err := os.WriteFile(file, []byte("alpha\nbeta\nmissing authorization header\ngamma\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := EvidenceRef{Path: file, LineStart: 3, SnippetProbe: "missing authorization header"}
+	if !evidenceFresh("/", ref, ValidationOptions{}) {
+		t.Fatalf("expected fresh evidence on first read")
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if !evidenceFresh("/", ref, ValidationOptions{}) {
+		t.Fatalf("expected cached fresh evidence on second read")
 	}
 }

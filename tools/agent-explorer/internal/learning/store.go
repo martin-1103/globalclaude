@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"agent-explorer/internal/tools"
@@ -31,6 +32,8 @@ type EvidenceRef struct {
 	Path         string `json:"path,omitempty"`
 	Symbol       string `json:"symbol,omitempty"`
 	LineStart    int    `json:"line_start,omitempty"`
+	LineEnd      int    `json:"line_end,omitempty"`
+	BodyHash     string `json:"body_hash,omitempty"`
 	SnippetHash  string `json:"snippet_hash,omitempty"`
 	SnippetProbe string `json:"snippet_probe,omitempty"`
 }
@@ -56,6 +59,7 @@ type ValidationOptions struct {
 	CBMBinary      string
 	CBMCacheDir    string
 	TimeoutSeconds int
+	LineDistance   int
 }
 
 type Stats struct {
@@ -76,6 +80,19 @@ type Stats struct {
 
 var summaryNow = func() time.Time {
 	return time.Now().UTC()
+}
+
+var validationNow = func() time.Time {
+	return time.Now().UTC()
+}
+
+var validationCacheTTL = 5 * time.Minute
+
+var validationCache sync.Map
+
+type validationCacheEntry struct {
+	Fresh     bool
+	ExpiresAt time.Time
 }
 
 func AppendFeedback(memoryDir string, repo string, entry FeedbackEntry) error {
@@ -452,8 +469,12 @@ func staleEntry(repo string, entry FeedbackEntry, opts ValidationOptions) bool {
 }
 
 func evidenceFresh(repo string, ref EvidenceRef, opts ValidationOptions) bool {
+	if fresh, ok := cachedEvidenceFresh(repo, ref, opts); ok {
+		return fresh
+	}
 	path := strings.TrimSpace(filepath.ToSlash(ref.Path))
 	if path == "" {
+		storeEvidenceFresh(repo, ref, opts, false)
 		return false
 	}
 	full := path
@@ -462,23 +483,38 @@ func evidenceFresh(repo string, ref EvidenceRef, opts ValidationOptions) bool {
 	}
 	data, err := os.ReadFile(full)
 	if err != nil {
+		storeEvidenceFresh(repo, ref, opts, false)
 		return false
 	}
 	text := normalizeSnippet(string(data))
 	lines := strings.Split(string(data), "\n")
+	if hash := strings.TrimSpace(ref.SnippetHash); hash != "" && lineWindowHash(lines, ref.LineStart) == hash {
+		storeEvidenceFresh(repo, ref, opts, true)
+		return true
+	}
+	if body := strings.TrimSpace(ref.BodyHash); body != "" && bodyWindowHash(lines, ref.LineStart, ref.LineEnd) == body {
+		storeEvidenceFresh(repo, ref, opts, true)
+		return true
+	}
 	if probe := normalizeSnippet(ref.SnippetProbe); probe != "" && lineWindowContains(lines, ref.LineStart, probe) {
+		storeEvidenceFresh(repo, ref, opts, true)
 		return true
 	}
 	if probe := normalizeSnippet(ref.SnippetProbe); probe != "" && strings.Contains(text, probe) {
+		storeEvidenceFresh(repo, ref, opts, true)
 		return true
 	}
 	if tail := tailSymbol(ref.Symbol); tail != "" && containsSymbolToken(text, tail) {
+		storeEvidenceFresh(repo, ref, opts, true)
 		return true
 	}
 	if ref.Symbol != "" && symbolResolves(repo, ref, opts) {
+		storeEvidenceFresh(repo, ref, opts, true)
 		return true
 	}
-	return ref.Symbol == "" && normalizeSnippet(ref.SnippetProbe) == ""
+	fresh := ref.Symbol == "" && normalizeSnippet(ref.SnippetProbe) == ""
+	storeEvidenceFresh(repo, ref, opts, fresh)
+	return fresh
 }
 
 func lineWindowContains(lines []string, lineStart int, probe string) bool {
@@ -489,6 +525,31 @@ func lineWindowContains(lines []string, lineStart int, probe string) bool {
 	end := min(len(lines), lineStart+2)
 	window := normalizeSnippet(strings.Join(lines[start:end], "\n"))
 	return strings.Contains(window, probe)
+}
+
+func lineWindowHash(lines []string, lineStart int) string {
+	if lineStart <= 0 || len(lines) == 0 {
+		return ""
+	}
+	start := max(0, lineStart-3)
+	end := min(len(lines), lineStart+2)
+	return snippetHash(strings.Join(lines[start:end], "\n"))
+}
+
+func bodyWindowHash(lines []string, lineStart int, lineEnd int) string {
+	if lineStart <= 0 || len(lines) == 0 {
+		return ""
+	}
+	start := max(0, lineStart-1)
+	end := lineEnd
+	if end <= 0 || end < lineStart {
+		end = lineStart
+	}
+	end = min(len(lines), end)
+	if end <= start {
+		return ""
+	}
+	return snippetHash(strings.Join(lines[start:end], "\n"))
 }
 
 func containsSymbolToken(text string, symbol string) bool {
@@ -525,10 +586,72 @@ func symbolResolves(repo string, ref EvidenceRef, opts ValidationOptions) bool {
 	if refPath == "" || hitPath == "" {
 		return false
 	}
-	if filepath.IsAbs(refPath) && filepath.IsAbs(hitPath) {
-		return strings.EqualFold(hitPath, refPath)
+	lineDistance := opts.LineDistance
+	if lineDistance <= 0 {
+		lineDistance = 40
 	}
-	return strings.EqualFold(filepath.Base(hitPath), filepath.Base(refPath)) || strings.HasSuffix(hitPath, refPath)
+	lineClose := ref.LineStart <= 0 || hit.LineStart <= 0 || abs(hit.LineStart-ref.LineStart) <= lineDistance
+	if filepath.IsAbs(refPath) && filepath.IsAbs(hitPath) {
+		return strings.EqualFold(hitPath, refPath) && lineClose
+	}
+	samePath := strings.EqualFold(filepath.Base(hitPath), filepath.Base(refPath)) || strings.HasSuffix(hitPath, refPath)
+	return samePath && lineClose
+}
+
+func cachedEvidenceFresh(repo string, ref EvidenceRef, opts ValidationOptions) (bool, bool) {
+	key := validationCacheKey(repo, ref, opts)
+	if key == "" {
+		return false, false
+	}
+	raw, ok := validationCache.Load(key)
+	if !ok {
+		return false, false
+	}
+	entry, ok := raw.(validationCacheEntry)
+	if !ok {
+		validationCache.Delete(key)
+		return false, false
+	}
+	if validationNow().After(entry.ExpiresAt) {
+		validationCache.Delete(key)
+		return false, false
+	}
+	return entry.Fresh, true
+}
+
+func storeEvidenceFresh(repo string, ref EvidenceRef, opts ValidationOptions, fresh bool) {
+	key := validationCacheKey(repo, ref, opts)
+	if key == "" {
+		return
+	}
+	ttl := validationCacheTTL
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	validationCache.Store(key, validationCacheEntry{
+		Fresh:     fresh,
+		ExpiresAt: validationNow().Add(ttl),
+	})
+}
+
+func validationCacheKey(repo string, ref EvidenceRef, opts ValidationOptions) string {
+	path := strings.TrimSpace(filepath.ToSlash(ref.Path))
+	if path == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		filepath.Clean(repo),
+		path,
+		cleanKey(ref.Symbol),
+		fmt.Sprintf("%d", ref.LineStart),
+		fmt.Sprintf("%d", ref.LineEnd),
+		strings.TrimSpace(ref.BodyHash),
+		strings.TrimSpace(ref.SnippetHash),
+		normalizeSnippet(ref.SnippetProbe),
+		strings.TrimSpace(opts.CBMBinary),
+		strings.TrimSpace(opts.CBMCacheDir),
+		fmt.Sprintf("%d", opts.LineDistance),
+	}, "|")
 }
 
 func readFeedbackEntries(path string) ([]FeedbackEntry, error) {
@@ -624,6 +747,13 @@ func topCounts(input map[string]int, limit int) map[string]int {
 		out[item.key] = item.score
 	}
 	return out
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func normalizeEvidence(items []EvidenceRef) []EvidenceRef {

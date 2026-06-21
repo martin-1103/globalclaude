@@ -33,6 +33,7 @@ type RepoProfile struct {
 	PrecisionFirst    bool                `json:"precision_first,omitempty"`
 	MaxToolFamilies   int                 `json:"max_tool_families,omitempty"`
 	MemoryEntryBudget int                 `json:"memory_entry_budget,omitempty"`
+	StaleLineDistance int                 `json:"stale_line_distance,omitempty"`
 	QueryHints        []string            `json:"query_hints,omitempty"`
 	NegativeHints     []string            `json:"negative_hints,omitempty"`
 	ConceptOverlays   map[string][]string `json:"concept_overlays,omitempty"`
@@ -93,6 +94,9 @@ func LoadRuntime(path string, repo string) (Runtime, error) {
 	}
 	if profile.MemoryEntryBudget <= 0 {
 		profile.MemoryEntryBudget = 1000
+	}
+	if profile.StaleLineDistance <= 0 {
+		profile.StaleLineDistance = 40
 	}
 	return Runtime{Config: cfg, Profile: profile}, nil
 }

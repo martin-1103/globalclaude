@@ -9,9 +9,12 @@ import (
 	"agent-explorer/internal/tools"
 )
 
-func FinalAnswer(result explorer.Result, citationOnly bool, agentMode bool, debugRetrieval bool) string {
+func FinalAnswer(result explorer.Result, citationOnly bool, agentMode bool, mainAgentMode bool, debugRetrieval bool) string {
 	if citationOnly {
 		return citationBlock(result.Hits)
+	}
+	if mainAgentMode {
+		return mainAgentAnswer(result)
 	}
 	if agentMode {
 		return agentAnswer(result, debugRetrieval)
@@ -186,6 +189,46 @@ func agentAnswer(result explorer.Result, debugRetrieval bool) string {
 	return strings.TrimSpace(b.String())
 }
 
+func mainAgentAnswer(result explorer.Result) string {
+	var b strings.Builder
+	primary := result.PrimaryHits
+	if len(primary) == 0 {
+		primary = limitCitations(result.Hits, 2)
+	}
+	supporting := result.SupportingHits
+	if len(supporting) == 0 && len(result.Hits) > len(primary) {
+		supporting = limitCitations(result.Hits[len(primary):], 1)
+	}
+	b.WriteString("retrieval_contract\n")
+	status := retrievalStatus(result.Hits)
+	confidence := topConfidence(result.Hits)
+	b.WriteString("status=" + status)
+	b.WriteString(" intent=" + nonEmpty(result.Plan.Intent, "unknown"))
+	b.WriteString(" question_class=" + questionClass(result))
+	b.WriteString(" confidence=" + confidence)
+	b.WriteString(" primary=" + nonEmpty(result.Plan.PrimaryTool, "unknown"))
+	if lane := dominantLane(result.Hits); lane != "" {
+		b.WriteString(" lane=" + lane)
+	}
+	b.WriteString("\n")
+	writeContractSection(&b, "primary_evidence", primary, 2)
+	writeContractSection(&b, "supporting_evidence", supporting, 1)
+	writeContractSection(&b, "trace_evidence", result.TraceHits, 1)
+	gaps := resultGaps(result)
+	b.WriteString("gaps:\n")
+	if len(gaps) == 0 {
+		b.WriteString("- none\n")
+	} else {
+		for _, gap := range gaps {
+			b.WriteString("- " + gap + "\n")
+		}
+	}
+	b.WriteString("recommended_action=" + recommendedAction(result))
+	b.WriteString("\n")
+	b.WriteString(citationBlock(limitCitations(result.Hits, 4)))
+	return strings.TrimSpace(b.String())
+}
+
 func shortSymbol(symbol string) string {
 	if strings.TrimSpace(symbol) == "" {
 		return ""
@@ -246,6 +289,96 @@ func compactTerms(terms []string) []string {
 		}
 	}
 	return out
+}
+
+func questionClass(result explorer.Result) string {
+	switch {
+	case result.Plan.NeedCallGraph || len(result.TraceHits) != 0:
+		return "trace"
+	case result.Plan.Intent == "mixed":
+		return "multi-hop"
+	case result.Plan.Intent == "literal":
+		return "literal"
+	case result.Plan.Intent == "definition":
+		return "lookup"
+	default:
+		return "behavior"
+	}
+}
+
+func topConfidence(hits []tools.Hit) string {
+	if len(hits) == 0 {
+		return "none"
+	}
+	return nonEmpty(hits[0].Confidence, "none")
+}
+
+func writeContractSection(b *strings.Builder, label string, hits []tools.Hit, maxItems int) {
+	b.WriteString(label + ":\n")
+	if len(hits) == 0 {
+		b.WriteString("- none\n")
+		return
+	}
+	count := 0
+	for _, hit := range hits {
+		if count >= maxItems {
+			break
+		}
+		b.WriteString(fmt.Sprintf("- %s:%d-%d", hit.File, hit.LineStart, hit.LineEnd))
+		if hit.Symbol != "" {
+			b.WriteString(" " + shortSymbol(hit.Symbol))
+		}
+		b.WriteString(" :: " + nonEmpty(hit.Why, hit.EvidenceType, "evidence"))
+		b.WriteString("\n")
+		count++
+	}
+	if count == 0 {
+		b.WriteString("- none\n")
+	}
+}
+
+func resultGaps(result explorer.Result) []string {
+	gaps := []string{}
+	if len(result.Hits) == 0 {
+		return []string{"no retrieval evidence"}
+	}
+	if retrievalStatus(result.Hits) != "grounded" {
+		gaps = append(gaps, "top evidence not grounded")
+	}
+	if result.Plan.Intent == "mixed" && len(result.SupportingHits) == 0 {
+		gaps = append(gaps, "missing supporting evidence for multi-hop query")
+	}
+	if result.Plan.NeedCallGraph && len(result.TraceHits) == 0 {
+		gaps = append(gaps, "missing trace evidence")
+	}
+	if len(result.Warnings) != 0 {
+		gaps = append(gaps, result.Warnings[0])
+	}
+	if len(gaps) > 2 {
+		gaps = gaps[:2]
+	}
+	return gaps
+}
+
+func recommendedAction(result explorer.Result) string {
+	status := retrievalStatus(result.Hits)
+	switch {
+	case status == "abstain":
+		return "re-retrieve"
+	case status == "weak_evidence":
+		return "re-retrieve"
+	case len(result.Plan.Slots) > 1 && len(result.SupportingHits) == 0 && result.Plan.Intent == "mixed":
+		return "re-retrieve"
+	default:
+		return "reason"
+	}
+}
+
+func limitCitations(hits []tools.Hit, maxItems int) []tools.Hit {
+	if len(hits) <= maxItems {
+		return hits
+	}
+	return hits[:maxItems]
 }
 
 func writeEvidenceSection(b *strings.Builder, hits []tools.Hit, label string, maxItems int) {

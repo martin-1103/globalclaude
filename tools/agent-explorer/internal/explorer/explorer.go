@@ -58,6 +58,7 @@ func (e *Explorer) Run(ctx context.Context, repo string, query string, includeEx
 		CBMBinary:      e.cfg.CBMBinary,
 		CBMCacheDir:    e.cfg.CBMCacheDir,
 		TimeoutSeconds: e.cfg.ToolTimeoutSeconds,
+		LineDistance:   e.profile.StaleLineDistance,
 	})
 	e.memory = summary
 	plan, planErr := e.planner.Build(ctx, repo, query)
@@ -733,37 +734,52 @@ func (e *Explorer) executePlan(ctx context.Context, repo string, plan planner.Pl
 		}
 	}
 	exactSymbolPrepass()
+	var runToolTermsScopedWithAnchors func(name string, terms []string, pathFilter string, boostAnchors []tools.PathAnchor)
 	runToolTermsScoped := func(name string, terms []string, pathFilter string) {
+		runToolTermsScopedWithAnchors(name, terms, pathFilter, anchors)
+	}
+	fetchToolTermsScoped := func(name string, terms []string, pathFilter string, boostAnchors []tools.PathAnchor) ([]tools.Hit, error) {
 		if name == "" {
-			return
+			return nil, nil
 		}
-		attempted = append(attempted, name)
-		familiesUsed++
 		var hits []tools.Hit
+		var firstErr error
 		switch name {
 		case "graph":
 			hits = parallelPerTerm(ctx, terms, func(term string) ([]tools.Hit, error) {
 				result, err := tools.SearchGraphScoped(ctx, repo, e.cfg.CBMBinary, e.cfg.CBMCacheDir, term, pathFilter, e.cfg.ToolTimeoutSeconds, e.cfg.MaxSearchResults)
 				result = filterHitsByPathRegex(repo, result, pathFilter)
 				markLane(result, "graph")
-				boostAnchored(repo, result, anchors)
+				boostAnchored(repo, result, boostAnchors)
 				return result, err
-			}, func(err error) { addWarning(name, err) })
+			}, func(err error) {
+				if err != nil && firstErr == nil {
+					firstErr = err
+				}
+			})
 		case "graph_text":
 			hits = parallelPerTerm(ctx, terms, func(term string) ([]tools.Hit, error) {
 				result, err := tools.SearchCodeScoped(ctx, repo, e.cfg.CBMBinary, e.cfg.CBMCacheDir, term, pathFilter, e.cfg.ToolTimeoutSeconds, e.cfg.MaxSearchResults)
 				result = filterHitsByPathRegex(repo, result, pathFilter)
 				markLane(result, "graph_text")
-				boostAnchored(repo, result, anchors)
+				boostAnchored(repo, result, boostAnchors)
 				return result, err
-			}, func(err error) { addWarning(name, err) })
+			}, func(err error) {
+				if err != nil && firstErr == nil {
+					firstErr = err
+				}
+			})
 		case "semantic":
 			hits = parallelPerTerm(ctx, terms, func(term string) ([]tools.Hit, error) {
 				result, err := tools.SemanticSearch(ctx, repo, e.cfg.ClaudeContextCmd, term, e.cfg.ToolTimeoutSeconds, e.cfg.MaxSearchResults)
 				markLane(result, "semantic")
-				boostAnchored(repo, result, anchors)
+				boostAnchored(repo, result, boostAnchors)
 				return result, err
-			}, func(err error) { addWarning(name, err) })
+			}, func(err error) {
+				if err != nil && firstErr == nil {
+					firstErr = err
+				}
+			})
 		case "rg":
 			hits = parallelPerTerm(ctx, terms, func(term string) ([]tools.Hit, error) {
 				var result []tools.Hit
@@ -774,20 +790,36 @@ func (e *Explorer) executePlan(ctx context.Context, repo string, plan planner.Pl
 					result, err = tools.RG(ctx, repo, term, e.cfg.ToolTimeoutSeconds, e.cfg.MaxSearchResults)
 				}
 				markLane(result, "rg")
-				boostAnchored(repo, result, anchors)
+				boostAnchored(repo, result, boostAnchors)
 				return result, err
-			}, func(err error) { addWarning(name, err) })
+			}, func(err error) {
+				if err != nil && firstErr == nil {
+					firstErr = err
+				}
+			})
 		case "astgrep":
 			result, err := tools.ASTGrep(ctx, repo, plan.ASTPattern, e.cfg.ToolTimeoutSeconds, e.cfg.MaxSearchResults)
-			addWarning(name, err)
+			if err != nil {
+				firstErr = err
+			}
 			markLane(result, "astgrep")
-			boostAnchored(repo, result, anchors)
+			boostAnchored(repo, result, boostAnchors)
 			hits = append(hits, result...)
 		}
+		return hits, firstErr
+	}
+	runToolTermsScopedWithAnchors = func(name string, terms []string, pathFilter string, boostAnchors []tools.PathAnchor) {
+		if name == "" {
+			return
+		}
+		attempted = append(attempted, name)
+		familiesUsed++
+		hits, err := fetchToolTermsScoped(name, terms, pathFilter, boostAnchors)
+		addWarning(name, err)
 		appendHits(hits)
 	}
 	runToolTerms := func(name string, terms []string) {
-		runToolTermsScoped(name, terms, "")
+		runToolTermsScopedWithAnchors(name, terms, "", anchors)
 	}
 	shouldAvoidScopedRG := func(toolName string, slot planner.EvidenceSlot, pathFilter string) bool {
 		if toolName != "rg" || strings.TrimSpace(pathFilter) == "" {
@@ -849,6 +881,75 @@ func (e *Explorer) executePlan(ctx context.Context, repo string, plan planner.Pl
 	}
 
 	if len(plan.Slots) != 0 {
+		if e.cfg.ParallelRetrieval {
+			type slotRun struct {
+				slot      planner.EvidenceSlot
+				toolName  string
+				terms     []string
+				scope     string
+				anchorSet []tools.PathAnchor
+			}
+			grouped := map[string][]slotRun{}
+			familyOrder := []string{}
+			seenFamily := map[string]bool{}
+			for _, slot := range plan.Slots {
+				terms := e.slotQueriesWithPlan(slot, plan)
+				toolName := slot.Tool
+				anchorSet := anchors
+				if scoped := slotAnchors[slotKey(slot)]; len(scoped) != 0 {
+					anchorSet = scoped
+				}
+				scope := e.slotPathFilter(slot, anchorSet)
+				if plan.Intent == "definition" || plan.Intent == "literal" {
+					toolName = plan.PrimaryTool
+				}
+				if strings.TrimSpace(toolName) == "" {
+					toolName = plan.PrimaryTool
+				}
+				run := slotRun{slot: slot, toolName: toolName, terms: terms, scope: scope, anchorSet: anchorSet}
+				grouped[toolName] = append(grouped[toolName], run)
+				if !seenFamily[toolName] {
+					seenFamily[toolName] = true
+					familyOrder = append(familyOrder, toolName)
+				}
+			}
+			for _, family := range familyOrder {
+				if familiesUsed >= maxFamilies {
+					break
+				}
+				runs := grouped[family]
+				results := parallelSlotRuns(ctx, runs, func(run slotRun) slotFetchResult {
+					pathFilter := run.scope
+					if shouldAvoidScopedRG(run.toolName, run.slot, run.scope) {
+						pathFilter = ""
+					}
+					hits, err := fetchToolTermsScoped(run.toolName, run.terms, pathFilter, run.anchorSet)
+					return slotFetchResult{slot: run.slot, toolName: run.toolName, terms: run.terms, scope: run.scope, anchorSet: run.anchorSet, hits: hits, err: err}
+				})
+				attempted = append(attempted, family)
+				familiesUsed++
+				for _, result := range results {
+					addWarning(result.toolName, result.err)
+					appendHits(result.hits)
+				}
+				for _, result := range results {
+					if e.slotCovered(result.slot, collected) {
+						continue
+					}
+					backup := e.slotBackupTool(result.slot, plan)
+					if backup != "" && backup != result.toolName && familiesUsed < maxFamilies {
+						pathFilter := result.scope
+						if shouldAvoidScopedRG(backup, result.slot, result.scope) {
+							pathFilter = ""
+						}
+						runToolTermsScopedWithAnchors(backup, result.terms, pathFilter, result.anchorSet)
+					}
+				}
+				if familiesUsed >= maxFamilies && e.coverageSatisfied(plan, collected) && hasConfidenceAtLeast(collected, "medium") {
+					return limitHits(collected, e.cfg.MaxSearchResults), warnings
+				}
+			}
+		} else {
 		for _, slot := range plan.Slots {
 			terms := e.slotQueriesWithPlan(slot, plan)
 			toolName := slot.Tool
@@ -878,6 +979,7 @@ func (e *Explorer) executePlan(ctx context.Context, repo string, plan planner.Pl
 			if familiesUsed >= maxFamilies && e.coverageSatisfied(plan, collected) && hasConfidenceAtLeast(collected, "medium") {
 				return limitHits(collected, e.cfg.MaxSearchResults), warnings
 			}
+		}
 		}
 		if len(collected) != 0 && e.coverageSatisfied(plan, collected) && hasConfidenceAtLeast(collected, "medium") {
 			return limitHits(collected, e.cfg.MaxSearchResults), warnings
@@ -3278,6 +3380,50 @@ func parallelPerTerm(ctx context.Context, terms []string, run func(term string) 
 	return merged
 }
 
+type slotFetchResult struct {
+	slot      planner.EvidenceSlot
+	toolName  string
+	terms     []string
+	scope     string
+	anchorSet []tools.PathAnchor
+	hits      []tools.Hit
+	err       error
+}
+
+func parallelSlotRuns[T any](ctx context.Context, items []T, run func(T) slotFetchResult) []slotFetchResult {
+	if len(items) == 0 {
+		return nil
+	}
+	if len(items) == 1 {
+		return []slotFetchResult{run(items[0])}
+	}
+	limit := parallelSlotWorkers(len(items))
+	sem := make(chan struct{}, limit)
+	ch := make(chan slotFetchResult, len(items))
+	var wg sync.WaitGroup
+	for _, item := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(item T) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ch <- run(item)
+		}(item)
+	}
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+	results := make([]slotFetchResult, 0, len(items))
+	for result := range ch {
+		results = append(results, result)
+	}
+	return results
+}
+
 func parallelTermWorkers(termCount int) int {
 	switch {
 	case termCount <= 1:
@@ -3288,6 +3434,19 @@ func parallelTermWorkers(termCount int) int {
 		return 3
 	default:
 		return 4
+	}
+}
+
+func parallelSlotWorkers(slotCount int) int {
+	switch {
+	case slotCount <= 1:
+		return 1
+	case slotCount <= 2:
+		return slotCount
+	case slotCount <= 4:
+		return 2
+	default:
+		return 3
 	}
 }
 

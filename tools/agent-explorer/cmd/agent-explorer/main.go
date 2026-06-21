@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -156,6 +157,7 @@ func runMemory(args []string) error {
 		CBMBinary:      runtime.Config.CBMBinary,
 		CBMCacheDir:    runtime.Config.CBMCacheDir,
 		TimeoutSeconds: runtime.Config.ToolTimeoutSeconds,
+		LineDistance:   runtime.Profile.StaleLineDistance,
 	})
 	if err != nil {
 		return err
@@ -213,6 +215,7 @@ func runMemoryCompact(args []string) error {
 		CBMBinary:      runtime.Config.CBMBinary,
 		CBMCacheDir:    runtime.Config.CBMCacheDir,
 		TimeoutSeconds: runtime.Config.ToolTimeoutSeconds,
+		LineDistance:   runtime.Profile.StaleLineDistance,
 	})
 	if err != nil {
 		return err
@@ -241,6 +244,7 @@ func runMemoryMaintain(args []string) error {
 		CBMBinary:      runtime.Config.CBMBinary,
 		CBMCacheDir:    runtime.Config.CBMCacheDir,
 		TimeoutSeconds: runtime.Config.ToolTimeoutSeconds,
+		LineDistance:   runtime.Profile.StaleLineDistance,
 	})
 	if err != nil {
 		return err
@@ -258,6 +262,7 @@ func runMemoryMaintain(args []string) error {
 		CBMBinary:      runtime.Config.CBMBinary,
 		CBMCacheDir:    runtime.Config.CBMCacheDir,
 		TimeoutSeconds: runtime.Config.ToolTimeoutSeconds,
+		LineDistance:   runtime.Profile.StaleLineDistance,
 	})
 	if err != nil {
 		return err
@@ -335,6 +340,7 @@ func runAsk(args []string) error {
 	citationOnly := fs.Bool("citation-only", false, "only output final_answer block")
 	jsonMode := fs.Bool("json", false, "output json result")
 	agentMode := fs.Bool("agent-mode", false, "ultra-compact output for main agent")
+	mainAgentMode := fs.Bool("main-agent", false, "strict retrieval contract for main agent")
 	explainMode := fs.Bool("explain", false, "add short LLM summary on top of retrieval pack")
 	debugRetrieval := fs.Bool("debug-retrieval", false, "show suppressed retrieval hits")
 	parallelRetrieval := fs.Bool("parallel-retrieval", false, "force semantic+graph_text dual-lane when possible")
@@ -377,7 +383,7 @@ func runAsk(args []string) error {
 		return nil
 	}
 
-	fmt.Println(format.FinalAnswer(result, *citationOnly, *agentMode, *debugRetrieval))
+	fmt.Println(format.FinalAnswer(result, *citationOnly, *agentMode, *mainAgentMode, *debugRetrieval))
 	return nil
 }
 
@@ -628,6 +634,7 @@ func runEval(args []string) error {
 		CBMBinary:      runtime.Config.CBMBinary,
 		CBMCacheDir:    runtime.Config.CBMCacheDir,
 		TimeoutSeconds: runtime.Config.ToolTimeoutSeconds,
+		LineDistance:   runtime.Profile.StaleLineDistance,
 	}); err == nil {
 		fmt.Printf("Memory Maintenance: %s\n", memoryMaintenanceSummary(stats, runtime.Profile.MemoryEntryBudget, true))
 	}
@@ -762,10 +769,51 @@ func evidenceRefsForPaths(hits []tools.Hit, paths []string) []learning.EvidenceR
 			Path:         hit.File,
 			Symbol:       hit.Symbol,
 			LineStart:    hit.LineStart,
+			LineEnd:      hit.LineEnd,
+			BodyHash:     bodyHashForHit(hit),
 			SnippetProbe: hit.Snippet,
 		})
 	}
 	return out
+}
+
+func bodyHashForHit(hit tools.Hit) string {
+	path := strings.TrimSpace(hit.File)
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	start := max(0, hit.LineStart-1)
+	end := hit.LineEnd
+	if end <= 0 || end < hit.LineStart {
+		end = hit.LineStart
+	}
+	end = min(len(lines), end)
+	if end <= start {
+		return ""
+	}
+	return learningSnippetHash(strings.Join(lines[start:end], "\n"))
+}
+
+func learningSnippetHash(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return ""
+	}
+	fields := strings.Fields(v)
+	if len(fields) == 0 {
+		return ""
+	}
+	joined := strings.Join(fields, " ")
+	if len(joined) > 1600 {
+		joined = joined[:1600]
+	}
+	sum := sha1.Sum([]byte(joined))
+	return fmt.Sprintf("%x", sum[:8])
 }
 
 func shouldAutoLearn(result explorer.Result, pass bool) bool {
@@ -873,6 +921,7 @@ func runInitProfile(args []string) error {
 		PrecisionFirst:    true,
 		MaxToolFamilies:   2,
 		MemoryEntryBudget: 1000,
+		StaleLineDistance: 40,
 	}
 	switch {
 	case strings.Contains(profile.Stack, "go"):
@@ -1091,5 +1140,9 @@ Commands:
   version   print version
 
 Example:
-  agent-explorer ask --repo /www/wwwroot/gass/be --query "where retry logic lives"`)
+  agent-explorer ask --repo /www/wwwroot/gass/be --query "where retry logic lives"
+
+Ask modes:
+  --agent-mode compact retrieval pack
+  --main-agent strict retrieval contract for main agent`)
 }

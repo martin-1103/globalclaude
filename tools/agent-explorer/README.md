@@ -64,6 +64,7 @@ agent-explorer version
 
 - default: retrieval pack + scored hits + `<final_answer>`
 - `--agent-mode`: ultra-compact retrieval pack for main agent/subagent
+- `--main-agent`: strict retrieval contract for orchestrating main agent
 - `--explain`: optional short LLM summary on top of retrieval pack
 - `--citation-only`: only `<final_answer>`
 - `--json`: machine-readable payload
@@ -138,6 +139,7 @@ Profile controls:
 - query hints
 - negative hints
 - memory entry budget for maintenance policy
+- stale line-distance tolerance for memory revalidation
 - optional `concept_overlays` for repo-local domain vocabulary
 
 `concept_overlays` is where project-specific synonyms belong.

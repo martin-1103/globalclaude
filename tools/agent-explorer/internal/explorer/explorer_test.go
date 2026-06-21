@@ -83,3 +83,15 @@ func TestParallelPerTermRespectsWorkerLimit(t *testing.T) {
 		t.Fatalf("max concurrent workers = %d, want <= 4", maxSeen)
 	}
 }
+
+func TestParallelSlotWorkersBounded(t *testing.T) {
+	if got := parallelSlotWorkers(1); got != 1 {
+		t.Fatalf("parallelSlotWorkers(1) = %d, want 1", got)
+	}
+	if got := parallelSlotWorkers(3); got != 2 {
+		t.Fatalf("parallelSlotWorkers(3) = %d, want 2", got)
+	}
+	if got := parallelSlotWorkers(8); got != 3 {
+		t.Fatalf("parallelSlotWorkers(8) = %d, want 3", got)
+	}
+}
