@@ -1,0 +1,35 @@
+{
+  "name": "critical retrieval paths",
+  "cases": [
+    {
+      "query": "where request timeout configured",
+      "expect_any_path": ["pkg/visitor/api_client.go", "services/message-service/cmd/consumer/main.go", "pkg/currency/rate.go", "services/sync-service/internal/sync/api_client.go"],
+      "expect_any_symbol": ["NewAPIClient", "Timeout", "ReadTimeout", "WriteTimeout"]
+    },
+    {
+      "query": "where feature flags checked",
+      "expect_any_path": ["services/management-service/internal/repository/project_feature_repository.go"],
+      "expect_any_symbol": ["IsEnabled", "FeatureFlag"]
+    },
+    {
+      "query": "where backfill stalls are detected and where retry or tune logic lives",
+      "expect_any_path": ["services/sync-service/internal/backfill/gap_detector.go", "services/sync-service/internal/source_mirror/puller.go"],
+      "expect_any_symbol": ["DetectGap", "DetectProjectGap", "shouldRetryWithSmallerPage", "WithPageTuning", "queryWithRetry"]
+    },
+    {
+      "query": "how parity failures are handled and where current projection or reconcile path is involved",
+      "expect_any_path": ["services/report-service/cmd/hatchet-worker/cs_current_projection.go", "services/report-service/internal/worker/parity_audit_jobs.go"],
+      "expect_any_symbol": ["rebuildCSCurrentProjection", "publishCSCurrentTable", "runPendingParityAudit", "shouldPauseParityAuditForReportReconcileBacklog", "checkBacklogGate"]
+    },
+    {
+      "query": "where source mirror page tuning configured",
+      "expect_any_path": ["services/sync-service/internal/source_mirror/puller.go"],
+      "expect_any_symbol": ["WithPageTuning", "WithPageTuningMin"]
+    },
+    {
+      "query": "where parity audit pauses for reconcile backlog",
+      "expect_any_path": ["services/report-service/internal/worker/parity_audit_jobs.go"],
+      "expect_any_symbol": ["shouldPauseParityAuditForReportReconcileBacklog", "checkBacklogGate"]
+    }
+  ]
+}

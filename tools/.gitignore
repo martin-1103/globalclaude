@@ -1,0 +1,12 @@
+# runtime secrets — NEVER commit (api_key, DB credentials)
+config.json
+*/config.json
+*/projects/
+*/data/
+*/context.md
+*.key
+
+# build artifacts (8-10MB each; build from source via `go build`)
+agent-db/agent-db
+agent-log/agent-log
+agent-explorer/agent-explorer

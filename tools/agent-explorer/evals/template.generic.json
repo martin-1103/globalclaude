@@ -1,0 +1,180 @@
+{
+  "name": "generic explore template",
+  "cases": [
+    {
+      "query": "where auth middleware defined",
+      "expect_any_path": ["middleware/auth", "auth.go", "auth.py", "auth.ts"],
+      "expect_any_symbol": ["AuthMiddleware", "Authenticate", "RequireAuth"]
+    },
+    {
+      "query": "which funcs call ClaimsFromContext",
+      "expect_any_path": ["middleware/auth", "handler/auth"],
+      "expect_any_symbol": ["ClaimsFromContext"]
+    },
+    {
+      "query": "find missing authorization header error",
+      "expect_any_path": ["middleware/auth"],
+      "expect_any_symbol": []
+    },
+    {
+      "query": "where retry publisher defined",
+      "expect_any_path": ["retry", "publisher"],
+      "expect_any_symbol": ["RetryPublisher", "PublishFailedRows"]
+    },
+    {
+      "query": "where request context gets claims stored",
+      "expect_any_path": ["middleware/auth"],
+      "expect_any_symbol": ["WithClaims", "ClaimsFromContext"]
+    },
+    {
+      "query": "trace how auth middleware validates token and where claims are consumed",
+      "expect_any_path": ["middleware/auth", "handler/auth", "handler", "route"],
+      "expect_any_symbol": ["ValidateToken", "ClaimsFromContext", "WithClaims", "RequireAuth"]
+    },
+    {
+      "query": "where jwt token parsed",
+      "expect_any_path": ["auth", "jwt"],
+      "expect_any_symbol": ["ParseToken", "ValidateToken", "ParseJWT"]
+    },
+    {
+      "query": "which handlers read claims from context",
+      "expect_any_path": ["handler", "route", "controller"],
+      "expect_any_symbol": ["ClaimsFromContext", "CurrentUser", "RequireRole"]
+    },
+    {
+      "query": "where bearer token extracted from request",
+      "expect_any_path": ["auth", "middleware"],
+      "expect_any_symbol": ["Authorization", "Bearer", "ExtractToken"]
+    },
+    {
+      "query": "where retry logic lives",
+      "expect_any_path": ["retry", "backoff", "queue", "publisher"],
+      "expect_any_symbol": ["Retry", "Requeue", "Backoff", "RetryPublisher"]
+    },
+    {
+      "query": "where backoff policy defined",
+      "expect_any_path": ["retry", "backoff"],
+      "expect_any_symbol": ["Backoff", "RetryPolicy", "NextDelay"]
+    },
+    {
+      "query": "which code requeues failed work",
+      "expect_any_path": ["retry", "queue", "publisher", "worker"],
+      "expect_any_symbol": ["Requeue", "Retry", "PublishFailedRows"]
+    },
+    {
+      "query": "where dead letter or failed message publisher defined",
+      "expect_any_path": ["publisher", "queue", "retry", "dlq"],
+      "expect_any_symbol": ["PublishFailed", "DeadLetter", "RetryPublisher"]
+    },
+    {
+      "query": "where request timeout configured",
+      "expect_any_path": ["config", "http", "client", "server"],
+      "expect_any_symbol": ["Timeout", "ReadTimeout", "WriteTimeout"]
+    },
+    {
+      "query": "where rate limit middleware defined",
+      "expect_any_path": ["middleware", "rate", "limit", "throttle"],
+      "expect_any_symbol": ["RateLimit", "Throttle", "Limiter"]
+    },
+    {
+      "query": "where pagination defaults defined",
+      "expect_any_path": ["pagination", "page", "query", "handler"],
+      "expect_any_symbol": ["PageSize", "Limit", "Pagination"]
+    },
+    {
+      "query": "where validation errors returned",
+      "expect_any_path": ["validator", "validation", "handler", "middleware"],
+      "expect_any_symbol": ["Validate", "BindAndValidate", "ValidationError"]
+    },
+    {
+      "query": "find exact unauthorized error message",
+      "expect_any_path": ["auth", "middleware", "security"],
+      "expect_any_symbol": []
+    },
+    {
+      "query": "find exact forbidden error message",
+      "expect_any_path": ["auth", "middleware", "security"],
+      "expect_any_symbol": []
+    },
+    {
+      "query": "where database transaction begins",
+      "expect_any_path": ["repository", "store", "db", "transaction"],
+      "expect_any_symbol": ["BeginTx", "Transaction", "WithTx"]
+    },
+    {
+      "query": "which repository writes audit log",
+      "expect_any_path": ["repository", "store", "audit"],
+      "expect_any_symbol": ["Audit", "InsertAudit", "WriteAudit"]
+    },
+    {
+      "query": "where background worker loop defined",
+      "expect_any_path": ["worker", "jobs", "consumer", "runner"],
+      "expect_any_symbol": ["Run", "Start", "Worker", "Consume"]
+    },
+    {
+      "query": "which code schedules jobs",
+      "expect_any_path": ["scheduler", "cron", "jobs", "worker"],
+      "expect_any_symbol": ["Schedule", "Cron", "Enqueue"]
+    },
+    {
+      "query": "where queue consumer handles messages",
+      "expect_any_path": ["consumer", "queue", "worker"],
+      "expect_any_symbol": ["HandleMessage", "Consume", "Process"]
+    },
+    {
+      "query": "where HTTP client configured",
+      "expect_any_path": ["client", "http", "transport"],
+      "expect_any_symbol": ["NewClient", "HTTPClient", "Transport"]
+    },
+    {
+      "query": "where external API retries configured",
+      "expect_any_path": ["client", "retry", "http"],
+      "expect_any_symbol": ["Retry", "Backoff", "DoWithRetry"]
+    },
+    {
+      "query": "where webhook signature validated",
+      "expect_any_path": ["webhook", "signature", "middleware", "handler"],
+      "expect_any_symbol": ["ValidateSignature", "VerifySignature", "Webhook"]
+    },
+    {
+      "query": "which route handles health check",
+      "expect_any_path": ["handler", "route", "health"],
+      "expect_any_symbol": ["Health", "HealthCheck", "Ready"]
+    },
+    {
+      "query": "where config loaded from env",
+      "expect_any_path": ["config", "env", "bootstrap"],
+      "expect_any_symbol": ["LoadConfig", "FromEnv", "MustGetenv"]
+    },
+    {
+      "query": "where feature flags checked",
+      "expect_any_path": ["feature", "flag", "config", "service"],
+      "expect_any_symbol": ["FeatureFlag", "IsEnabled", "Enabled"]
+    },
+    {
+      "query": "which code publishes projection or read model",
+      "expect_any_path": ["projection", "publish", "read_model", "materialized"],
+      "expect_any_symbol": ["Projection", "Publish", "Projector"]
+    },
+    {
+      "query": "which code reconciles or repairs inconsistent state",
+      "expect_any_path": ["reconcile", "repair", "heal", "recover"],
+      "expect_any_symbol": ["Reconcile", "Repair", "Heal", "Recover"]
+    },
+    {
+      "query": "where stale work or stuck jobs detected",
+      "expect_any_path": ["watchdog", "detect", "monitor", "worker", "queue"],
+      "expect_any_symbol": ["Detect", "Watchdog", "Monitor", "Check"]
+    },
+    {
+      "query": "where backfill stalls are detected and where retry or tune logic lives",
+      "expect_any_path": ["backfill", "retry", "tune", "throttle"],
+      "expect_any_symbol": ["DetectGap", "Retry", "Backfill", "Tune"]
+    },
+    {
+      "query": "how parity failures are handled and where current projection or reconcile path is involved",
+      "expect_any_path": ["parity", "projection", "reconcile", "repair"],
+      "expect_any_symbol": ["Reconcile", "Projection", "Parity", "Repair"]
+    }
+  ]
+}

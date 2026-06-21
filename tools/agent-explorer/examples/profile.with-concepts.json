@@ -1,0 +1,19 @@
+{
+  "name": "example-repo",
+  "stack": "go",
+  "preferred_primary": ["graph", "graph_text", "semantic"],
+  "precision_first": true,
+  "max_tool_families": 2,
+  "query_hints": [
+    "prefer symbol/call graph for definitions and callers",
+    "use semantic only for conceptual behavior when exact symbol unknown"
+  ],
+  "negative_hints": [
+    "avoid rg-first for symbol lookup"
+  ],
+  "concept_overlays": {
+    "backfill": ["backfill", "queue_backfill", "delta_sync"],
+    "reconcile": ["reconcile", "repair", "heal", "rebuild"],
+    "projection": ["projection", "read_model", "materialized_view"]
+  }
+}

@@ -1,0 +1,190 @@
+{
+  "name": "gass-be complex explore suite",
+  "cases": [
+    {
+      "query": "how does auth middleware work",
+      "expect_any_path": ["services/internal-admin/internal/middleware/auth.go"],
+      "expect_any_symbol": ["Authenticate", "NewAuthMiddleware"],
+      "reject_top_path": ["_test.go", "/tests/", "scripts/deprecated"]
+    },
+    {
+      "query": "where is ClaimsFromContext defined",
+      "expect_top_path": ["services/internal-admin/internal/middleware/auth.go"],
+      "expect_top_symbol": ["ClaimsFromContext"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "which funcs call ClaimsFromContext",
+      "expect_any_path": ["services/internal-admin/internal/handler/auth.go", "services/internal-admin/internal/middleware/auth.go"],
+      "expect_any_symbol": ["ClaimsFromContext", "Me", "RequireRole"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "find missing authorization header error",
+      "expect_top_path": ["services/internal-admin/internal/middleware/auth.go"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where auth me endpoint reads claims from context",
+      "expect_any_path": ["services/internal-admin/internal/handler/auth.go"],
+      "expect_any_symbol": ["Me"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where auth middleware puts claims into request context",
+      "expect_any_path": ["services/internal-admin/internal/middleware/auth.go"],
+      "expect_any_symbol": ["WithClaims"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where auth middleware reads Authorization header",
+      "expect_any_path": ["services/internal-admin/internal/middleware/auth.go"],
+      "expect_any_symbol": ["Authenticate"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where auth middleware checks Bearer format",
+      "expect_any_path": ["services/internal-admin/internal/middleware/auth.go"],
+      "expect_any_symbol": ["Authenticate"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where invalid token returned in auth middleware",
+      "expect_any_path": ["services/internal-admin/internal/middleware/auth.go"],
+      "expect_any_symbol": ["Authenticate"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where clickhouse failed rows published to retry chain",
+      "expect_any_path": ["services/event-processor-service/internal/clickhouse/flush_retry_publisher.go"],
+      "expect_any_symbol": ["PublishFailedRows", "FlushRetryPublisher"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where retry logic for clickhouse flush lives",
+      "expect_any_path": ["services/event-processor-service/internal/clickhouse/flush_retry_publisher.go"],
+      "expect_any_symbol": ["FlushRetryPublisher", "NewLazyFlushRetryPublisher"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "how parity failures are handled and where current projection or reconcile path is involved",
+      "expect_any_path": ["services/report-service/cmd/hatchet-worker/cs_current_projection.go", "services/report-service/internal/worker/parity_audit_jobs.go", "services/report-service/cmd/hatchet-worker/gap_reaper.go"],
+      "expect_any_symbol": ["rebuildCSCurrentProjection", "shouldPauseParityAuditForReportReconcileBacklog", "ExistsCompletedReportReconcileAfter"],
+      "reject_top_path": ["_test.go", "/tests/", "scripts/deprecated"]
+    },
+    {
+      "query": "where current projection rebuild task is created",
+      "expect_top_path": ["services/report-service/cmd/hatchet-worker/cs_current_projection_job.go"],
+      "expect_top_symbol": ["newCSCurrentProjectionRebuildTask"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where current projection gets rebuilt",
+      "expect_top_path": ["services/report-service/cmd/hatchet-worker/cs_current_projection.go"],
+      "expect_top_symbol": ["rebuildCSCurrentProjection"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where parity audit pauses for report reconcile backlog",
+      "expect_top_path": ["services/report-service/internal/worker/parity_audit_jobs.go"],
+      "expect_top_symbol": ["shouldPauseParityAuditForReportReconcileBacklog"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "how backfill stalls are detected and where retry or tune logic lives",
+      "expect_any_path": ["services/sync-service/internal/backfill/backfill.go", "services/sync-service/internal/backfill/gap_detector.go", "services/sync-service/internal/source_mirror/puller.go", "services/sync-service/internal/repository/summary_rebuild_retry.go"],
+      "expect_any_symbol": ["DetectProjectGap", "DetectGap", "queryWithRetry", "WithPageTuning", "RequeueFailedRebuildJobs"],
+      "reject_top_path": ["_test.go", "/tests/", "scripts/deprecated"]
+    },
+    {
+      "query": "where backfill gap detector lives",
+      "expect_top_path": ["services/sync-service/internal/backfill/gap_detector.go"],
+      "expect_top_symbol": ["DetectGap"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where project gap detection runs in backfill",
+      "expect_top_path": ["services/sync-service/internal/backfill/backfill.go"],
+      "expect_top_symbol": ["DetectProjectGap"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where source mirror retries query with smaller pages",
+      "expect_any_path": ["services/sync-service/internal/source_mirror/puller.go"],
+      "expect_any_symbol": ["queryWithRetry", "shouldRetryWithSmallerPage", "retryBackoff"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where source mirror page tuning configured",
+      "expect_top_path": ["services/sync-service/internal/source_mirror/puller.go"],
+      "expect_top_symbol": ["WithPageTuning"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where rebuild retry queue logic lives in sync service",
+      "expect_top_path": ["services/sync-service/internal/repository/summary_rebuild_retry.go"],
+      "expect_top_symbol": ["RequeueFailedRebuildJobs", "RequeueFailedSummaryRebuildJobs"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "explain how PullCursor avoids poison loops on pre-TTL rows and persist-unconfirmed writes, including where cursor rollback happens",
+      "expect_any_path": ["services/sync-service/internal/source_mirror/puller.go", "services/sync-service/internal/source_mirror/cutoff.go", "services/sync-service/internal/source_mirror/writer.go"],
+      "expect_any_symbol": ["PullCursor", "PreTTLCutoff", "CountPersistedKeys"],
+      "reject_top_path": ["_test.go", "/tests/", "services/report-service/internal/parity/explain"]
+    },
+    {
+      "query": "trace how source_mirror completeness bounds backfill range for report_data and visitor data, and which manifest gate prevents uncoverable work items",
+      "expect_any_path": ["services/sync-service/internal/backfill/gap_detector.go", "services/sync-service/internal/backfill/mirror_fetcher.go", "services/sync-service/internal/source_mirror/repository.go"],
+      "expect_any_symbol": ["sourceMirrorDateRange", "requireCompleteTableRange", "IsRangeComplete"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "trace how cs_current_projection publishes tombstones for stale keys and which function computes active-vs-previous key diff before batch insert",
+      "expect_any_path": ["services/report-service/cmd/hatchet-worker/cs_current_projection.go"],
+      "expect_any_symbol": ["rebuildCSCurrentProjection", "publishCSCurrentTable", "loadActiveCSCurrentKeys"],
+      "reject_top_path": ["_test.go", "/tests/", "google-ads-context-service"]
+    },
+    {
+      "query": "where source mirror persist verification query lives",
+      "expect_any_path": ["services/sync-service/internal/source_mirror/writer.go"],
+      "expect_any_symbol": ["CountPersistedKeys"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where source mirror cutoff date for TTL is defined",
+      "expect_top_path": ["services/sync-service/internal/source_mirror/cutoff.go"],
+      "expect_top_symbol": ["PreTTLCutoff"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where source mirror manifest reconcile runs",
+      "expect_top_path": ["services/sync-service/internal/source_mirror/manifest_reconciler.go"],
+      "expect_top_symbol": ["Reconcile"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where report reconcile completion gate is checked for parity pause",
+      "expect_any_path": ["services/report-service/internal/worker/parity_audit_jobs.go", "services/report-service/internal/repository/report_reconcile_runs.go"],
+      "expect_any_symbol": ["shouldPauseParityAuditForReportReconcileBacklog", "ExistsCompletedReportReconcileAfter"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where current projection publishes cs current table rows",
+      "expect_any_path": ["services/report-service/cmd/hatchet-worker/cs_current_projection.go"],
+      "expect_any_symbol": ["publishCSCurrentTable"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where active current projection keys are loaded before tombstones",
+      "expect_top_path": ["services/report-service/cmd/hatchet-worker/cs_current_projection.go"],
+      "expect_top_symbol": ["loadActiveCSCurrentKeys"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    },
+    {
+      "query": "where source mirror query builder creates SQL from cursor",
+      "expect_top_path": ["services/sync-service/internal/source_mirror/query_builder.go"],
+      "expect_top_symbol": ["Build"],
+      "reject_top_path": ["_test.go", "/tests/"]
+    }
+  ]
+}

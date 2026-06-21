@@ -1,0 +1,11 @@
+{
+  "base_url": "https://YOUR-ROUTER/v1",
+  "api_key": "sk-REPLACE-ME",
+  "model": "ag/gemini-3-flash-agent",
+  "max_display_lines": 80,
+  "tool_timeout_seconds": 30,
+  "llm_timeout_seconds": 60,
+  "max_turns": 15,
+  "vlogs_url": "http://localhost:9428",
+  "gasslog_path": "/var/pile/agent-log/gasslog.sh"
+}

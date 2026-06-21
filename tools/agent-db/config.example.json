@@ -1,0 +1,10 @@
+{
+  "base_url": "https://YOUR-ROUTER/v1",
+  "api_key": "sk-REPLACE-ME",
+  "model": "ag/gemini-3-flash-agent",
+  "query_limit": 50,
+  "max_display_rows": 20,
+  "tool_timeout_seconds": 30,
+  "llm_timeout_seconds": 60,
+  "max_turns": 15
+}
