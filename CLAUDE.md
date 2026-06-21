@@ -74,28 +74,20 @@ Decision tree (pakai paling murah yang cukup):
 ```
 path/file diketahui?              → Read / grep / rg langsung
 string/nama persis, 1 pattern?    → grep / rg
-struktural (callers/impact/graph)?→ codebase-memory MCP langsung (mcp__codebase-memory__*, project harus indexed)
-path unknown, multi-file explore? → fastcontext skill      (model murah, bukan Claude)
+struktural (callers/impact/graph)?→ codebase-memory MCP langsung (mcp__codebase-memory-mcp__*, project harus indexed)
+semantic/multi-hop/presisi?       → agent-explorer CLI (Bash "agent-explorer ask", raw citation, MAIN yang reason)
 konsep/semantic, nama ga tau?     → claude-context search_code(path, query)
 ```
 
-Flow utama: fastcontext return `file:line` → main agent Read file → main agent reason.
+Flow utama: agent-explorer return ranked `file:line` → main agent Read file → main agent reason.
 Reasoning selalu di main agent, bukan subagent.
 
 Detail per tool:
 - **grep/rg** — string/nama persis, 1 dir. Termurah, tanpa spawn.
-- **`fastcontext`** — path/symbol unknown, butuh search→trace→read lintas file. Subprocess
-  model murah; return hanya `file:line` + summary. Main agent HARUS Read file:line hasilnya
-  sebelum reason — jangan reason atas summary fastcontext saja.
-  - **"No final answer after N turns" = query kelebar/multi-part, BUKAN tool rusak.** Tiap
-    sub-pertanyaan makan turn; gabung 4 (insert + guard + graduation + why) → habis turn sebelum
-    converge. Fix: SATU pertanyaan per call, scope lokasi lebar ("anywhere in services/"),
-    `--max-turns 12-15`. Verified sesi: 4× lebar gagal → 1 atomic ("find code that INSERT
-    rebuild_jobs, which file?") langsung balik `file:line`. Gagal 2× = sempitkan, JANGAN
-    respawn identik (bias sama).
-  - **JANGAN pipe** (`fctx ... | tail/grep`) dari main thread — pipe = raw gather, dispatcher
-    hook block-nya. `fctx` polos lolos. Output fctx udah ringkas, ga butuh pipe.
-- **codebase-memory MCP** (`mcp__codebase-memory__search_graph`/`trace_path`/`get_code_snippet`/`query_graph`) — who-calls, impact, call chain, symbol def. Panggil LANGSUNG dari main agent (hook ga block lagi). Exact + cepat. Project harus indexed dulu.
+- **`agent-explorer` CLI** — semantic/multi-hop/presisi: di mana X, gimana Y jalan, apa yang manggil Z, trace flow. Hybrid retrieval (rg + ast-grep + codebase-memory + claude-context) + fusion rerank + adaptive memory per-repo. Panggil `Bash("agent-explorer ask --repo <repo> --query '<q>' --agent-mode")` → balik retrieval pack `file:line` ter-skor + status grounded/weak/abstain. ZERO LLM summary di tengah (beda dari subagent) → ga mislead. Main agent HARUS Read file:line hasilnya sebelum reason.
+  - Lambat (~25s/query, ada LLM rerank). Buat discovery presisi yang worth nunggu, BUKAN lookup remeh — itu cukup grep/rg.
+  - SATU pertanyaan per call; scope lokasi lebar di query. Multi-part → pecah jadi beberapa call.
+- **codebase-memory MCP** (`mcp__codebase-memory-mcp__search_graph`/`trace_path`/`get_code_snippet`/`query_graph`) — who-calls, impact, call chain, symbol def. Panggil LANGSUNG dari main agent (hook ga block lagi). Exact + cepat. Project harus indexed dulu.
 - **claude-context `search_code`** — konsep/semantic, nama ga tau. Repo harus ke-index
   (`index_codebase`); auto-sync tiap 5m. Milvus :19530. Pakai HANYA pas nama/string ga tau.
 
@@ -184,7 +176,7 @@ FETCH (cari/baca/query, ga butuh reason) dari REASON (korelasi, hipotesis, putus
 `haiku-*` = FETCH only — jangan kasih kerja reason ke haiku (model kecil, hasil cacat). `haiku-bash` DIHINDARI — truncate output lalu overclaim; pakai `ctx_batch_execute` sebagai gantinya.
 Tiered:
 
-- **Fetch 1 sudut, sedang** → skill `fastcontext` (file/symbol/semantic discovery, model murah, return file:line). Banyak file ke-glob / file panjang, cuma butuh citations — main agent Read + reason sendiri.
+- **Fetch 1 sudut, sedang** → `agent-explorer` CLI (`Bash("agent-explorer ask ...")`, semantic/symbol discovery, raw ranked citation). Banyak file ke-glob / file panjang, cuma butuh citations — main agent Read + reason sendiri. Butuh baca project-docs + sintesis → `sonnet-explorer` subagent.
 - **Shell output besar** → `ctx_batch_execute(commands=[...], queries=[...])`. Raw output ke FTS5 disk index (zero main context token), main terima hanya matched section. Zero LLM di tengah = zero fabrication. Pakai ini ganti `haiku-bash` — haiku terlalu kecil, truncate output lalu fill gap optimistis (✅ tanpa bukti). `ctx_batch_execute` deterministik + lebih murah.
 - **DB query** → jalankan `Bash("agent-db 'pertanyaan'")` dari main agent langsung. agent-db = CLI Go di `/usr/local/bin/agent-db`, agentic loop via 9router, tool calls grounded (real docker exec). Per-project config: `/var/pile/agent-db/projects/<slug>/config.json`. Setup baru: `agent-db init --project /path`. List project: `agent-db projects`.
 - **Log query** → jalankan `Bash("agent-log 'pertanyaan'")` dari main agent langsung. agent-log = CLI Go di `/usr/local/bin/agent-log`, agentic loop via 9router, tools: VictoriaLogs (`http://localhost:9428`) + gasslog.sh (docker container logs). Config global: `/var/pile/agent-log/config.json`. Flag opsional: `--vlogs URL`, `--timeout N`.

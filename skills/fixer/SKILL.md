@@ -36,8 +36,9 @@ file is also the resume point: a restart re-reads it and continues from the firs
   - **low/med risk, logic, 1-3 files** → `sonnet-editor` (default).
   - **high risk / 4+ files / algorithm / concurrency / schema-contract** → `opus-coder`.
   - Editors get raw context they need from haiku first (see below); they don't go hunting.
-- **Haiku fetches, editors edit, you orchestrate.** Before an edit, `haiku-codebase-memory`
-  / `haiku-explorer` can fetch the surrounding code/callers so the editor starts informed.
+- **Fetch raw context, editors edit, you orchestrate.** Before an edit, codebase-memory MCP
+  (`mcp__codebase-memory-mcp__trace_path`/`get_code_snippet`) or the `agent-explorer` CLI
+  (`Bash("agent-explorer ask ...")`) can fetch the surrounding code/callers so the editor starts informed.
   After an edit, `haiku-bash` runs the verify command and returns output verbatim. The
   editor writes; haiku never writes code.
 - **Verify is not optional.** Every work item has a `verify` command that is RED before and
@@ -156,7 +157,7 @@ After the last wave, verify the WHOLE fix against the plan's **Verification** se
 not just per-item tests. Run the plan's end-to-end / regression checks via `haiku-bash`.
 
 - For a DATA incident, confirm BOTH tracks landed: forward-fix (code) AND remediation (the
-  corrupted data is actually repaired — re-count via `haiku-db` and compare to the
+  corrupted data is actually repaired — re-count via `agent-db` CLI (`Bash("agent-db '...'")`) and compare to the
   pre-fix number from the plan).
 - All checks green → proceed to ship.
 - A gap remains → if it's an execution miss (an item didn't fully do its job), loop back

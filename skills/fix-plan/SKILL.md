@@ -24,22 +24,31 @@ execute it safely in parallel without re-deciding anything.
 
 - **Bounded `Read` allowed directly in main** for small files (incident `.md`, plan docs,
   project-docs index) — use offset+limit, keep reads tight. Everything verbose goes through
-  subagents to keep main context clean. Subagents:
-  - `haiku-codebase-memory` — trace_path, who-calls-X, impact, find code by symbol.
+  fetchers/subagents to keep main context clean.
+
+  **Direct calls (CLI/MCP, no spawn — all parallelizable in one `tool_use` batch):**
+  - **codebase-memory MCP** — trace_path, who-calls-X, impact, find code by symbol.
+    Call directly: `mcp__codebase-memory-mcp__search_graph` / `trace_path` / `get_code_snippet` / `query_graph`.
     **Always pass project `www-wwwroot-gass-be`.**
-  - `sonnet-explorer` — read project-docs, find files/patterns, local search, semantic code search.
+  - **agent-db CLI** — any DB question (single query, multi-step, schema hunt, cross-table
+    correlation, row count, aggregate): `Bash("agent-db '<question>'")`. Handles schema
+    discovery + multi-step internally — one call regardless of complexity.
+  - **agent-log CLI** — re-confirm a runtime fact from logs: `Bash("agent-log '<question>'")`.
+  - **agent-explorer CLI** — code/symbol/pattern discovery: `Bash("agent-explorer ask --repo <repo> --query '<q>' --agent-mode")` — returns raw ranked `file:line` citations for YOU to read and reason over.
+
+  **Subagents (spawn):**
+  - `sonnet-explorer` — read project-docs (PRD/spec, ADRs, glossary, pitfalls) + a few bounded code reads, return excerpts+citations.
   - `haiku-research` — Tavily web research: best practice, common pitfalls, latest docs.
-  - `haiku-db` — single known query: exact count, row check, simple aggregate to size remediation.
-  - `sonnet-db` — multi-step DB investigation: when you need to discover/correlate data before you know the exact query (schema hunt, cross-table correlation, iterative filtering).
-  - `haiku-logs` / `haiku-bash` — only if you must re-confirm a runtime fact.
+  - `haiku-bash` — only if you must run a shell command that doesn't fit the CLIs above.
   - `codex:codex-rescue` — adversarial review of the chosen approach (gated by risk).
-- **Haiku FETCHES, you DECIDE.** Subagents pull raw signal (snippets, call edges, doc
-  quotes, row counts) verbatim. They do NOT pick the approach or judge tradeoffs. YOU
-  do all the deciding. A subagent that recommends an approach is doing your job at lower
-  quality — keep the line sharp.
-- **Fan out WIDE, scope each tight.** For N independent facts, spawn N subagents in ONE
-  batch (parallel, wall-clock ≈ slowest). Each gets ONE bounded objective, **≤8 tool
-  calls**. Never resume a finished agent — a fresh narrow spawn is cheaper.
+- **Fetchers gather, you DECIDE.** Direct CLI/MCP calls and subagents pull raw signal
+  (snippets, call edges, doc quotes, row counts) verbatim. They do NOT pick the approach
+  or judge tradeoffs. YOU do all the deciding. A fetcher that recommends an approach is
+  doing your job at lower quality — keep the line sharp.
+- **Fan out WIDE, scope each tight.** For N independent facts, issue N direct calls or
+  spawn N subagents in ONE batch (parallel, wall-clock ≈ slowest). Subagents each get ONE
+  bounded objective, **≤8 tool calls**. Never resume a finished agent — a fresh narrow
+  spawn is cheaper.
 - **Output contract on every spawn.** End each prompt with: "Return ONLY `file:line` +
   verbatim quotes/snippets + numbers (or doc finding + URL). No assessment, no
   recommendation, no narration."
@@ -50,8 +59,8 @@ execute it safely in parallel without re-deciding anything.
 
 ## Execution model — flat main-agent flow
 
-This skill owns every phase directly. Keep raw gather cheap by fanning out narrow
-`haiku-*` fetchers in parallel, then reason over their returns here. If a blocker needs
+This skill owns every phase directly. Keep raw gather cheap by issuing direct CLI/MCP
+calls and fanning out narrow subagents in parallel, then reason over their returns here. If a blocker needs
 user input, ask from this skill's main loop and continue after the answer. Write the
 scratch file and `.tasks.json` directly from this skill; no nested handoff layer exists.
 
@@ -78,15 +87,15 @@ scratch file and `.tasks.json` directly from this skill; no nested handoff layer
 
 ## Phase 1 — Recon + research (parallel, then barrier)
 
-> Run this phase directly in this skill. Fan out the haiku below, wait for all returns,
-> then continue only after the full recon is in hand.
+> Run this phase directly in this skill. Issue all direct calls and fan out subagents in
+> ONE batch, wait for all returns, then continue only after the full recon is in hand.
 
 Fan out in ONE batch. Scale the set to RISK (low → skip web research + domain read if the
 fix is a trivial local change; med/high → run all). **Mandatory for med/high:**
 
-- `haiku-codebase-memory` — **(a)** verify the incident's `file:line` is still LIVE (code
-  may have moved since the report was written); **(b)** trace the **blast radius of the
-  FIX**, not the bug: `trace_path(<fn to change>, mode=calls, direction=both,
+- **codebase-memory MCP** (direct) — **(a)** verify the incident's `file:line` is still
+  LIVE (code may have moved since the report was written); **(b)** trace the **blast radius
+  of the FIX**, not the bug: `trace_path(<fn to change>, mode=calls, direction=both,
   risk_labels=true)` — who calls the function you'll change, what contract/signature is
   shared, what breaks if it changes. `mode=cross_service` if the fix crosses a boundary.
   **If session-context check (Phase 0) found live trace edges from this session:** skip (b)
@@ -94,17 +103,18 @@ fix is a trivial local change; med/high → run all). **Mandatory for med/high:*
   **If the incident carried a `## Code map`:** treat it as the starting graph — still run
   (a) still-live (the map is a LEAD; code may have moved), but narrow (b) to the **fix
   delta** the map doesn't already cover. Don't blindly re-trace edges the map already lists.
-- `sonnet-explorer` — **domain pass (mandatory unless pure infra):** read
+- `sonnet-explorer` (subagent) — **domain pass (mandatory unless pure infra):** read
   `project-docs/project/` (business logic, glossary) + relevant `project-docs/decisions/`
   (ADRs). The fixer must NOT be the first to see a business constraint.
-- `sonnet-explorer` — **pitfalls pass (mandatory):** read `project-docs/tech-pitfalls/<tech>.md`
+- `sonnet-explorer` (subagent) — **pitfalls pass (mandatory):** read `project-docs/tech-pitfalls/<tech>.md`
   for every tech the fix touches (clickhouse, mysql, go, redis, …). Landmines belong in
   the plan, not discovered mid-execution.
-- `haiku-research` — best practice + common pitfalls + latest official docs for the
+- `haiku-research` (subagent) — best practice + common pitfalls + latest official docs for the
   technique the fix uses (e.g. "ClickHouse safe bulk delete", "Go background sweeper
   pattern"). Skip for low-risk local fixes.
-- `haiku-db` — if the incident left **corrupted/stuck data**, count exactly how many rows
-  /keys are affected and their shape. This sizes the remediation track in Phase 2.
+- **agent-db CLI** (direct) — if the incident left **corrupted/stuck data**, count exactly
+  how many rows/keys are affected and their shape: `Bash("agent-db 'count <table> where <condition>'")`.
+  This sizes the remediation track in Phase 2.
 
 **Barrier:** do not enter Phase 2 until every spawned agent has returned. Deciding on
 partial recon is how plans miss a caller or a constraint.

@@ -1,6 +1,6 @@
 ---
 name: haiku-research
-description: Use PROACTIVELY for external web research via the Tavily CLI — best practices, common pitfalls, latest official docs, library/API behavior, version-specific gotchas. Fetch-only: returns findings + source URLs verbatim, forms no opinion. Do NOT use for local code/file search (use haiku-explorer) or structural code questions (use haiku-codebase-memory).
+description: Use PROACTIVELY for external web research via the Tavily CLI — best practices, common pitfalls, latest official docs, library/API behavior, version-specific gotchas. Fetch-only: returns findings + source URLs verbatim, forms no opinion. Do NOT use for local code/file search (use the agent-explorer CLI) or structural code questions (use codebase-memory MCP).
 model: haiku
 tools: Bash, Read
 memory: project

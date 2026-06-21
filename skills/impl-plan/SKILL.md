@@ -27,14 +27,18 @@ execute it safely in parallel without re-deciding anything.
 
 - **Bounded `Read` allowed directly in main** for small files (spec/PRD, plan docs,
   project-docs index) — use offset+limit, keep reads tight. Everything verbose goes through
-  subagents to keep main context clean. Subagents:
-  - `haiku-codebase-memory` — trace_path, who-calls-X, impact, find code by symbol.
-    **Always pass project `www-wwwroot-gass-be`.**
-  - `sonnet-explorer` — read project-docs, find files/patterns, local search, semantic code search; also read the spec/PRD file if one was passed.
+  subagents to keep main context clean.
+
+  **Direct calls (CLI/MCP, no spawn):**
+  - **agent-db CLI** → `Bash("agent-db '<question>'")` — schema shape, row counts, cross-table queries, multi-step DB investigation (schema discovery, iterative filtering, cross-table correlation).
+  - **agent-log CLI** → `Bash("agent-log '<question>'")` — runtime log queries, confirm runtime facts from VictoriaLogs/docker container logs.
+  - **codebase-memory MCP** → `mcp__codebase-memory-mcp__search_graph` / `trace_path` / `get_code_snippet` / `query_graph` — trace_path, who-calls-X, impact, find code by symbol. **Always pass project `www-wwwroot-gass-be`.** Call DIRECTLY from main agent, NOT a subagent.
+  - **agent-explorer CLI** → `Bash("agent-explorer ask --repo <repo> --query '<q>' --agent-mode")` — code/symbol/pattern discovery; returns raw ranked `file:line` citations for YOU to read and reason over.
+
+  **Subagents (spawn):**
+  - `sonnet-explorer` — read project-docs (PRD/spec, ADRs, glossary, pitfalls) + a few bounded code reads, return excerpts+citations; also read the spec/PRD file if one was passed.
   - `haiku-research` — Tavily web research: best practice, common pitfalls, latest docs.
-  - `haiku-db` — single known query: schema shape, exact row count, simple aggregate.
-  - `sonnet-db` — multi-step DB investigation: schema discovery, cross-table correlation, iterative filtering when query path unknown upfront.
-  - `haiku-logs` / `haiku-bash` — only if you must confirm a runtime fact.
+  - `haiku-bash` — only if you must confirm a runtime fact not answerable via agent-log.
   - `codex:codex-rescue` — adversarial review of the chosen design (gated by risk).
 - **Haiku FETCHES, you DECIDE.** Subagents pull raw signal (snippets, call edges, doc
   quotes, schema/row counts) verbatim. They do NOT pick the design or judge tradeoffs.
@@ -55,8 +59,8 @@ execute it safely in parallel without re-deciding anything.
 ## Execution model — flat main-agent flow
 
 This skill owns every phase directly. Phase 0 still extracts requirements from this
-conversation context. Keep raw gather cheap by fanning out narrow `haiku-*` fetchers in
-parallel, then reason over their returns here. If a blocker needs user input, ask from
+conversation context. Keep raw gather cheap by issuing direct CLI/MCP calls (agent-db, agent-log, codebase-memory
+MCP) and narrow subagent spawns in parallel, then reason over their returns here. If a blocker needs user input, ask from
 this skill's main loop and continue after the answer. Write the scratch file and
 `.tasks.json` directly from this skill; no nested handoff layer exists.
 
@@ -64,7 +68,7 @@ this skill's main loop and continue after the answer. Write the scratch file and
 
 The source of truth is the **conversation context** — what the user described, agreed to,
 or rejected earlier this session. If a spec/PRD path was passed as an argument, have
-`haiku-explorer` read it and merge it with the conversation.
+`sonnet-explorer` read it and merge it with the conversation.
 
 Extract and write down explicitly:
 - **What** — the feature/change in one paragraph, in the user's own terms.
@@ -99,30 +103,32 @@ Set an initial **RISK level** — it gates Codex usage and editor choice downstr
 Fan out in ONE batch. Scale the set to RISK (low → skip web research + domain read if the
 change is trivially local; med/high → run all). **Mandatory for med/high:**
 
-- `haiku-codebase-memory` — **integration-point pass (the implementation-specific one):**
-  where does this feature attach to existing code? Find the route table/router, the
+- **codebase-memory MCP direct** — **integration-point pass (the implementation-specific one):**
+  where does this feature attach to existing code? Call `mcp__codebase-memory-mcp__search_graph`
+  or `get_code_snippet` (project `www-wwwroot-gass-be`) to find the route table/router, the
   handler layer, the service/repo layer, the cron/job registry, the config loader —
   whichever the feature touches. Return `file:line` of each attachment point and the
   existing pattern used there (so the new code can mirror it).
-- `haiku-codebase-memory` — **blast radius of the CHANGE:** for every existing function
-  /type/table the feature will modify (not just add next to), run
-  `trace_path(<symbol>, mode=calls, direction=both, risk_labels=true)` — who calls it,
-  what contract is shared, what breaks if it changes. `mode=cross_service` if the feature
-  crosses a boundary.
-- `haiku-explorer` — **EXISTING-vs-NEW sweep:** search for existing code that already does
+- **codebase-memory MCP direct** — **blast radius of the CHANGE:** for every existing function
+  /type/table the feature will modify (not just add next to), call
+  `mcp__codebase-memory-mcp__trace_path(<symbol>, mode=calls, direction=both, risk_labels=true)` —
+  who calls it, what contract is shared, what breaks if it changes. `mode=cross_service` if
+  the feature crosses a boundary. Always pass project `www-wwwroot-gass-be`.
+- **agent-explorer CLI** (`Bash("agent-explorer ask ...")`) — **EXISTING-vs-NEW sweep:** search for existing code that already does
   (part of) what the feature needs — helpers, similar endpoints, half-built attempts.
   Building a duplicate of something that exists is the top failure mode of feature work.
-- `haiku-explorer` — **domain pass (mandatory unless pure infra):** read
+- `sonnet-explorer` — **domain pass (mandatory unless pure infra):** read
   `project-docs/project/` (business logic, glossary) + relevant `project-docs/decisions/`
   (ADRs). The fixer must NOT be the first to see a business constraint.
-- `haiku-explorer` — **pitfalls pass (mandatory):** read `project-docs/tech-pitfalls/<tech>.md`
+- `sonnet-explorer` — **pitfalls pass (mandatory):** read `project-docs/tech-pitfalls/<tech>.md`
   for every tech the feature touches (clickhouse, mysql, go, redis, …). Landmines belong
   in the plan, not discovered mid-execution.
 - `haiku-research` — best practice + common pitfalls + latest official docs for the
   technique the feature uses (e.g. "Go worker pool graceful shutdown", "MySQL online DDL").
   Skip for low-risk local changes.
-- `haiku-db` — if the feature reads/writes existing data: current schema shape, row
-  volumes, existing values the new code must tolerate. This sizes migration/backfill work.
+- **agent-db CLI** (`Bash("agent-db '<question>'")`) — if the feature reads/writes existing data:
+  current schema shape, row volumes, existing values the new code must tolerate. This sizes
+  migration/backfill work.
 
 **Barrier:** do not enter Phase 2 until every spawned agent has returned. Deciding on
 partial recon is how plans miss a caller or a constraint.

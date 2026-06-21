@@ -17,32 +17,19 @@ ambiguous target service).
 
 ## Operating rules
 
-- **Delegate large gathering to subagents.** Bounded `Read` (with offset+limit) is allowed directly in main for small files (INDEX.md, incident `.md`, scratch files) — these are cheap and don't bloat context. Everything verbose goes through subagents to keep main context clean. Subagents:
-  - `haiku-logs` — service/container logs, error tailing, crash traces, request tracing.
-  - `haiku-db` — single known query: exact count, simple aggregate, row check. Query already clear before spawning.
-  - `sonnet-db` — multi-step DB investigation: schema discovery, cross-table correlation, iterative filtering, data hunt where query path unknown upfront.
-  - `haiku-codebase-memory` — who-calls-X, trace_path, impact analysis, find the code
-    behind an error string. **Always pass project `www-wwwroot-gass-be`** so the agent
-    does not guess the project.
-  - `sonnet-explorer` — file/symbol/pattern discovery when the code graph misses.
-  - `haiku-bash` — any other verbose shell (docker ps, service status, disk, builds).
-- **Haiku FETCHES, you REASON — keep the line sharp.** Subagents are cheap fetchers:
-  they pull raw signal (log lines, row counts, query text, call edges) and return it
-  verbatim. They do NOT form hypotheses, judge root cause, or say "EUREKA". YOU (the
-  main agent) do ALL correlation, hypothesis-forming, and confirm/kill — over the
-  collected evidence. Pushing judgment into a haiku = Opus's job at haiku quality:
-  shallow, drift-prone. Gather wide and dumb; keep reasoning central.
-- **Fan out WIDE — many narrow haiku in parallel.** Haiku is cheap and parallel spawns
-  run concurrently (wall-clock ≈ slowest agent, not the sum), so for N independent facts
-  spawn N agents in ONE batch — never serialize. The only limit is per-agent and it's
-  about quality: ONE bounded objective, **≤8 tool calls** each. A single 28-call
-  open-ended agent is the anti-pattern — that's where haiku drifts and cost grows
-  super-linearly (each call re-feeds its whole transcript). Split it into narrow
-  fetchers. Never resume a finished agent to "save a spawn" — re-hydrating its fat
-  transcript costs MORE than a fresh narrow spawn (measured).
-- **Output contract on every spawn.** End each subagent prompt with: "Return ONLY
-  `file:line` + verbatim quotes + numbers. No assessment, no narration, no 'EUREKA'."
-  This keeps prose out of main context — you supply the judgment, they supply the facts.
+- **Delegate large gathering — direct calls for CLI/MCP, spawn only for shell work.** Bounded `Read` (with offset+limit) is allowed directly in main for small files (INDEX.md, incident `.md`, scratch files) — these are cheap and don't bloat context. Everything verbose is offloaded, but the mechanism matters:
+
+  **Direct calls (CLI/MCP — no spawn, main agent calls these directly):**
+  - **agent-db CLI** — all DB work: single known queries (counts, aggregates, row checks) AND multi-step investigation (schema discovery, cross-table correlation, iterative filtering, data hunt). Call: `Bash("agent-db '<question>'")`. Handles schema discovery + multi-step internally; you just ask the question.
+  - **agent-log CLI** — service/container logs, error tailing, crash traces, request tracing. Call: `Bash("agent-log '<question>'")`.
+  - **codebase-memory MCP** — who-calls-X, trace_path, impact analysis, find the code behind an error string. Call directly: `mcp__codebase-memory-mcp__search_graph`, `trace_path`, `get_code_snippet`, `query_graph`, `search_code`. **Always pass project `www-wwwroot-gass-be`**.
+
+  **Subagents (spawn via Agent tool):**
+  - `haiku-bash` — any other verbose shell work (docker ps, service status, disk, builds).
+  - **code/symbol/pattern discovery (when the graph misses)** → `Bash("agent-explorer ask --repo <repo> --query '<q>' --agent-mode")` — raw ranked `file:line` citations; YOU read + reason. Reads project-docs instead → use `sonnet-explorer`.
+- **Fetchers supply data, you REASON — keep the line sharp.** CLI tools and subagents are cheap fetchers: they pull raw signal (log lines, row counts, query text, call edges) and return it verbatim. They do NOT form hypotheses, judge root cause, or say "EUREKA". YOU (the main agent) do ALL correlation, hypothesis-forming, and confirm/kill — over the collected evidence. agent-db/agent-log return clean answers; codebase-memory MCP returns structured data. All reasoning stays here.
+- **Fan out WIDE — many independent fetches in parallel.** Independent CLI calls and subagent spawns run concurrently (wall-clock ≈ slowest, not the sum), so issue N independent fetches in ONE batch of tool_uses — never serialize. For CLI/MCP: batch multiple `Bash("agent-db ...")`, `Bash("agent-log ...")`, and `mcp__codebase-memory-mcp__*` calls in one message. For haiku-bash subagents: spawn ONE per bounded objective, **≤8 tool calls** each. A single 28-call open-ended agent is the anti-pattern — that's where drift and cost grow super-linearly. Split into narrow fetchers. Never resume a finished subagent to "save a spawn" — re-hydrating its fat transcript costs MORE than a fresh narrow spawn (measured).
+- **Output contract on every subagent spawn.** End each subagent prompt with: "Return ONLY `file:line` + verbatim quotes + numbers. No assessment, no narration, no 'EUREKA'." This keeps prose out of main context — you supply the judgment, they supply the facts. (CLI tools — agent-db, agent-log — already return structured answers; no output contract needed.)
 - **Evidence or it didn't happen.** Every claim needs a citation: `file:line`, a
   metric/row count, or an exact quoted log line. Unsure → say "belum yakin" + what to check.
 - **Quote errors exactly.** Never paraphrase an error message or stack frame.
@@ -52,10 +39,7 @@ ambiguous target service).
 
 ## Execution model — flat main-agent flow
 
-This skill owns every phase directly. Keep the heavy work cheap by fanning out narrow
-`haiku-*` fetchers in parallel, then reason over their raw returns here. Do not insert
-an intermediate orchestrator. If a blocker needs user input, ask from this skill's main
-loop and continue after the answer; no nested respawn/handoff layer exists.
+This skill owns every phase directly. Keep the heavy work cheap by fanning out direct CLI/MCP calls and narrow `haiku-bash` subagents in parallel, then reason over their returns here. Do not insert an intermediate orchestrator. If a blocker needs user input, ask from this skill's main loop and continue after the answer; no nested respawn/handoff layer exists.
 
 ## Phase 0 — Recall (cheap, do first)
 
@@ -78,16 +62,10 @@ If a prior fix matches the symptom, verify it still applies before re-investigat
 
 Pin down: **which service, what symptom, when did it start, blast radius.**
 
-Fan out in ONE batch (parallel subagents):
-- `haiku-logs` — **enumerate ALL distinct error signatures** in the incident window,
-  not just the loudest/topmost one. For each: first-occurrence timestamp + verbatim
-  signature + rough count. The noisiest error often masks a quieter independent one
-  that surfaces only after you fix the loud one (the "fix → new error" trap, cause #3).
-  List every distinct signature now so multi-cause incidents are caught up front, not
-  one fix later.
-- `haiku-bash` — service/container status (up? restarting? OOMKilled? exit code?).
-- `haiku-db` (only if symptom smells like data) — quick sanity counts on the
-  relevant table(s) around the affected time window.
+Fan out in ONE batch (parallel tool calls):
+- `Bash("agent-log '...'")` — **enumerate ALL distinct error signatures** in the incident window, not just the loudest/topmost one. For each: first-occurrence timestamp + verbatim signature + rough count. The noisiest error often masks a quieter independent one that surfaces only after you fix the loud one (the "fix → new error" trap, cause #3). List every distinct signature now so multi-cause incidents are caught up front, not one fix later.
+- `haiku-bash` subagent — service/container status (up? restarting? OOMKilled? exit code?).
+- `Bash("agent-db '...'")` (only if symptom smells like data) — quick sanity counts on the relevant table(s) around the affected time window.
 
 **Triage the signature list before classifying.** If ≥2 distinct signatures with
 independent first-occurrence times / unrelated stack frames coexist in the window,
@@ -131,13 +109,8 @@ proceed to Phase 2 without a label.**
 > Run this phase directly in this skill. Own the trace+correlate loop end-to-end here.
 
 1. From the log, extract the exact error string + top stack frame / file:line.
-2. Map error → code via `haiku-codebase-memory`: `search_code("<error string>")` or
-   `search_graph` to find the function.
-3. Trace both directions in one spawn: `trace_path(function, mode=calls,
-   direction=both, risk_labels=true)` + `get_code_snippet` of the implicated lines +
-   the confirm-facts you'll need (e.g. "is there a handler/recovery path for the error
-   case?"). Inbound = trigger path; outbound = code-level blast radius.
-   `mode=cross_service` if it crosses a service boundary.
+2. Map error → code via codebase-memory MCP directly: `mcp__codebase-memory-mcp__search_code("<error string>")` or `mcp__codebase-memory-mcp__search_graph` to find the function. Always pass project `www-wwwroot-gass-be`.
+3. Trace both directions in one batch: `mcp__codebase-memory-mcp__trace_path(function, mode=calls, direction=both, risk_labels=true)` + `mcp__codebase-memory-mcp__get_code_snippet` of the implicated lines + any confirm-facts you need (e.g. "is there a handler/recovery path for the error case?"). Inbound = trigger path; outbound = code-level blast radius. `mode=cross_service` if it crosses a service boundary.
 4. Reason over the returned facts: what input/state makes this path fail? State the hypothesis.
 5. Confirm from facts in hand. Do failing requests match the hypothesized condition
    (timing, payload, config, deploy)? Correlate first-occurrence with
@@ -148,15 +121,10 @@ proceed to Phase 2 without a label.**
 
 > Run this phase directly in this skill. Own the quantify+locate+map loop here.
 
-1. Quantify precisely with `haiku-db`: expected vs actual counts, the exact
-   rows/keys that diverge, the time window.
+1. Quantify precisely with `Bash("agent-db '...'")`: expected vs actual counts, the exact rows/keys that diverge, the time window.
 2. Locate the divergence across the pipeline: source vs mirror vs target. Which hop
    dropped/duplicated/mangled the data? Compare row counts at each stage.
-3. Map to the code in one spawn: `trace_path(<writer/loader fn>, mode=data_flow,
-   direction=both)` — data_flow shows the arg expression at each hop, so you see where
-   the value is mutated upstream AND where it propagates downstream. `mode=cross_service`
-   when data crosses services (sync → mirror → target). In the same spawn fetch the
-   confirm-facts too (e.g. "does a sweeper/recovery path exist? quote the exact WHERE clause").
+3. Map to the code in one batch: `mcp__codebase-memory-mcp__trace_path(<writer/loader fn>, mode=data_flow, direction=both)` — data_flow shows the arg expression at each hop, so you see where the value is mutated upstream AND where it propagates downstream. `mode=cross_service` when data crosses services (sync → mirror → target). In the same batch fetch the confirm-facts too via `mcp__codebase-memory-mcp__get_code_snippet` (e.g. "does a sweeper/recovery path exist? quote the exact WHERE clause").
 4. Confirm from facts in hand: reproduce the bad transform logically against a known-bad
    key. Tie the anomaly to a specific code path, config, or backfill run (correlate with
    `detect_changes` if a deploy is suspected). Spawn a new agent only for a missing fact.
@@ -168,11 +136,10 @@ Branch here from Phase 2 when the root cause is unclear and the flat flow has st
 user says "investigate deep" / "competing hypotheses". Otherwise skip to Phase 3 — the
 default single-hypothesis flow handles ~90% of incidents.
 
-How deep mode runs (parallel haiku fan-out, stays flat):
+How deep mode runs (parallel fan-out, stays flat):
 1. Enumerate 2-4 competing hypotheses (e.g. "config regression from last deploy",
    "data-shape change upstream", "resource exhaustion", "race in writer").
-2. Spawn ONE haiku subagent per hypothesis **in a single parallel batch**. Each
-   gathers evidence (logs/DB/code) for its theory AND notes what would disprove it.
+2. For each hypothesis, issue the evidence-gathering calls in one parallel batch: `Bash("agent-log '...'")` for logs, `Bash("agent-db '...'")` for DB, `mcp__codebase-memory-mcp__*` for code — plus `haiku-bash` for any shell work. Each hypothesis gathers evidence for its theory AND notes what would disprove it.
 3. Collect all reports, play them against each other adversarially — which
    hypothesis survives the evidence, which are ruled out and why.
 4. Fall through to Phase 3. The report (Phase 4) must note which hypotheses were
@@ -181,8 +148,7 @@ How deep mode runs (parallel haiku fan-out, stays flat):
 ## Phase 3 — Confirm root cause
 
 > Run this disprove pass directly in this skill over the raw citations you already
-> gathered. If a needed fact is missing, spawn a fresh narrow **haiku** for that one
-> fact. Do not trust an unbacked claim.
+> gathered. If a needed fact is missing, make a fresh narrow call — `Bash("agent-db/agent-log '...'")` or `mcp__codebase-memory-mcp__*` for data/code, `haiku-bash` for shell work. Do not trust an unbacked claim.
 
 Before locking the root cause, answer two mandatory questions — they catch the two ways
 RCA fails (stopping at a symptom, and confirmation bias):
@@ -208,7 +174,7 @@ RCA fails (stopping at a symptom, and confirmation bias):
 
 3. **Blast-radius of the FIX, not just the bug (reduces regression, cause #2).** Before
    suggesting the change, run impact analysis on the code the fix will touch:
-   `trace_path(<fn to be changed>, mode=calls, direction=inbound)` to see every caller,
+   `mcp__codebase-memory-mcp__trace_path(<fn to be changed>, mode=calls, direction=inbound)` to see every caller,
    and check whether the fix mutates shared state, a config used elsewhere, or a function
    on other hot paths. Name any caller/path that could break. This cannot rule out
    regression fully — runtime effects (timing, load, data-shape) only surface after the

@@ -36,7 +36,7 @@ SKILL=$(printf '%s' "$INPUT" | jq -r '.tool_input.skill // ""' 2>/dev/null || ec
 # Only guard the fork-based gather skills. Others (investigate, fix-plan, etc.)
 # are orchestrators meant to run from anywhere — leave them alone.
 case "$SKILL" in
-  haiku-db|haiku-logs|haiku-explorer|haiku-bash|haiku-codebase-memory) ;;
+  haiku-bash) ;;
   *) exit 0 ;;
 esac
 
