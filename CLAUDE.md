@@ -180,6 +180,18 @@ Tiered:
 - **Shell output besar** → `ctx_batch_execute(commands=[...], queries=[...])`. Raw output ke FTS5 disk index (zero main context token), main terima hanya matched section. Zero LLM di tengah = zero fabrication. Pakai ini ganti `haiku-bash` — haiku terlalu kecil, truncate output lalu fill gap optimistis (✅ tanpa bukti). `ctx_batch_execute` deterministik + lebih murah.
 - **DB query** → jalankan `Bash("agent-db 'pertanyaan'")` dari main agent langsung. agent-db = CLI Go di `/usr/local/bin/agent-db`, agentic loop via 9router, tool calls grounded (real docker exec). Per-project config: `/var/pile/agent-db/projects/<slug>/config.json`. Setup baru: `agent-db init --project /path`. List project: `agent-db projects`.
 - **Log query** → jalankan `Bash("agent-log 'pertanyaan'")` dari main agent langsung. agent-log = CLI Go di `/usr/local/bin/agent-log`, agentic loop via 9router, tools: VictoriaLogs (`http://localhost:9428`) + gasslog.sh (docker container logs). Config global: `/var/pile/agent-log/config.json`. Flag opsional: `--vlogs URL`, `--timeout N`.
+
+**CRITICAL — agent-db dan agent-log = FETCH only, bukan reasoning engine.**
+Keduanya return data mentah (rows, log lines, counts). Mereka TIDAK BISA dan TIDAK BOLEH
+diminta untuk kausalitas, hipotesis, atau "kenapa". Framing query wajib sebagai data
+request, bukan investigasi:
+- ❌ `agent-log "kenapa error api-gateway naik tadi malam?"` → dia fabricate jawaban
+- ❌ `agent-db "apa yang menyebabkan transaksi gagal?"` → dia guess
+- ✅ `agent-log "count ERROR per jam, 6 jam terakhir, service=api-gateway"`
+- ✅ `agent-db "select count(*), status from transactions where created_at > now()-1h group by status"`
+Main agent yang menerima angka/baris → reason sendiri → baru tarik kesimpulan.
+"Cari kenapa X" adalah tugas REASONING — delegasikan ke `recon-orchestrator` (sonnet/opus),
+bukan ke agent-db/agent-log.
 - **Reason multi-sudut (ad-hoc, di luar skill)** → spawn `recon-orchestrator` (nested).
   Default `model=sonnet`; `model=opus` kalau korelasi/arsitektur berat. Dia fan-out haiku
   fetch, reason sendiri, balik jawaban+citations. Reason kompleks JANGAN dilempar ke
