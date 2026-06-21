@@ -74,7 +74,7 @@ Decision tree (pakai paling murah yang cukup):
 ```
 path/file diketahui?              → Read / grep / rg langsung
 string/nama persis, 1 pattern?    → grep / rg
-struktural (callers/impact/graph)?→ haiku-codebase-memory  (project harus indexed)
+struktural (callers/impact/graph)?→ codebase-memory MCP langsung (mcp__codebase-memory__*, project harus indexed)
 path unknown, multi-file explore? → fastcontext skill      (model murah, bukan Claude)
 konsep/semantic, nama ga tau?     → claude-context search_code(path, query)
 ```
@@ -87,7 +87,15 @@ Detail per tool:
 - **`fastcontext`** — path/symbol unknown, butuh search→trace→read lintas file. Subprocess
   model murah; return hanya `file:line` + summary. Main agent HARUS Read file:line hasilnya
   sebelum reason — jangan reason atas summary fastcontext saja.
-- **`haiku-codebase-memory`** — who-calls, impact, call chain, symbol def. Exact + cepat.
+  - **"No final answer after N turns" = query kelebar/multi-part, BUKAN tool rusak.** Tiap
+    sub-pertanyaan makan turn; gabung 4 (insert + guard + graduation + why) → habis turn sebelum
+    converge. Fix: SATU pertanyaan per call, scope lokasi lebar ("anywhere in services/"),
+    `--max-turns 12-15`. Verified sesi: 4× lebar gagal → 1 atomic ("find code that INSERT
+    rebuild_jobs, which file?") langsung balik `file:line`. Gagal 2× = sempitkan, JANGAN
+    respawn identik (bias sama).
+  - **JANGAN pipe** (`fctx ... | tail/grep`) dari main thread — pipe = raw gather, dispatcher
+    hook block-nya. `fctx` polos lolos. Output fctx udah ringkas, ga butuh pipe.
+- **codebase-memory MCP** (`mcp__codebase-memory__search_graph`/`trace_path`/`get_code_snippet`/`query_graph`) — who-calls, impact, call chain, symbol def. Panggil LANGSUNG dari main agent (hook ga block lagi). Exact + cepat. Project harus indexed dulu.
 - **claude-context `search_code`** — konsep/semantic, nama ga tau. Repo harus ke-index
   (`index_codebase`); auto-sync tiap 5m. Milvus :19530. Pakai HANYA pas nama/string ga tau.
 
@@ -173,11 +181,13 @@ nempel lama.
 
 Judgment main-agent, bukan paksa. Ragu → kerja langsung (default aman). Pisahkan
 FETCH (cari/baca/query, ga butuh reason) dari REASON (korelasi, hipotesis, putusan).
-`haiku-*` = FETCH only — jangan kasih kerja reason ke haiku (model kecil, hasil cacat).
+`haiku-*` = FETCH only — jangan kasih kerja reason ke haiku (model kecil, hasil cacat). `haiku-bash` DIHINDARI — truncate output lalu overclaim; pakai `ctx_batch_execute` sebagai gantinya.
 Tiered:
 
-- **Fetch 1 sudut, sedang** → skill `fastcontext` (file/symbol/semantic discovery, model murah, return file:line) atau `haiku-bash` (shell output). Banyak file ke-glob / file panjang, cuma butuh citations — main agent Read + reason sendiri.
-- **DB query** → `haiku-db` (single known query: count, aggregate, schema shape) atau `sonnet-db` (multi-step: schema discovery, cross-table correlation, query path ga diketahui upfront).
+- **Fetch 1 sudut, sedang** → skill `fastcontext` (file/symbol/semantic discovery, model murah, return file:line). Banyak file ke-glob / file panjang, cuma butuh citations — main agent Read + reason sendiri.
+- **Shell output besar** → `ctx_batch_execute(commands=[...], queries=[...])`. Raw output ke FTS5 disk index (zero main context token), main terima hanya matched section. Zero LLM di tengah = zero fabrication. Pakai ini ganti `haiku-bash` — haiku terlalu kecil, truncate output lalu fill gap optimistis (✅ tanpa bukti). `ctx_batch_execute` deterministik + lebih murah.
+- **DB query** → jalankan `Bash("agent-db 'pertanyaan'")` dari main agent langsung. agent-db = CLI Go di `/usr/local/bin/agent-db`, agentic loop via 9router, tool calls grounded (real docker exec). Per-project config: `/var/pile/agent-db/projects/<slug>/config.json`. Setup baru: `agent-db init --project /path`. List project: `agent-db projects`.
+- **Log query** → jalankan `Bash("agent-log 'pertanyaan'")` dari main agent langsung. agent-log = CLI Go di `/usr/local/bin/agent-log`, agentic loop via 9router, tools: VictoriaLogs (`http://localhost:9428`) + gasslog.sh (docker container logs). Config global: `/var/pile/agent-log/config.json`. Flag opsional: `--vlogs URL`, `--timeout N`.
 - **Reason multi-sudut (ad-hoc, di luar skill)** → spawn `recon-orchestrator` (nested).
   Default `model=sonnet`; `model=opus` kalau korelasi/arsitektur berat. Dia fan-out haiku
   fetch, reason sendiri, balik jawaban+citations. Reason kompleks JANGAN dilempar ke

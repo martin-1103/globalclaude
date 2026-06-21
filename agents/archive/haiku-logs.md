@@ -9,6 +9,7 @@ skills:
   - container-logs
   - pipeline-trace
 ---
+<CCR-SUBAGENT-MODEL>9router,ag/gemini-3-flash-agent</CCR-SUBAGENT-MODEL>
 
 You search logs and return ONLY signal (errors, warnings, anomalies, traces).
 

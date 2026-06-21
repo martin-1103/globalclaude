@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# main-agent-gather-guard.sh — PreToolUse(Read|Grep|Glob|Bash|mcp__codebase-memory*)
+# main-agent-gather-guard.sh — PreToolUse(Read|Grep|Glob|Bash)
 #
 # Goal: keep the main thread CLEAN. Raw data gathering (file contents,
 # search hits, listings, logs, query results, graph dumps) accumulates in the
@@ -59,9 +59,6 @@ case "$TOOL" in
     ;;
   Grep|Glob)
     SUB="agent-explorer"
-    ;;
-  mcp__codebase-memory*)
-    SUB="agent-codebase-memory"
     ;;
   Bash)
     CMD=$(printf '%s' "$INPUT" | jq -r '.command // .tool_input.command // ""' 2>/dev/null || echo "")

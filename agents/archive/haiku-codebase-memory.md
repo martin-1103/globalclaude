@@ -5,6 +5,7 @@ model: haiku
 tools: mcp__codebase-memory-mcp__get_architecture, mcp__codebase-memory-mcp__search_graph, mcp__codebase-memory-mcp__search_code, mcp__codebase-memory-mcp__trace_path, mcp__codebase-memory-mcp__query_graph, mcp__codebase-memory-mcp__detect_changes, mcp__codebase-memory-mcp__get_code_snippet, mcp__codebase-memory-mcp__get_graph_schema, mcp__codebase-memory-mcp__list_projects, mcp__codebase-memory-mcp__index_status
 memory: project
 ---
+<CCR-SUBAGENT-MODEL>9router,ag/gemini-3-flash-agent</CCR-SUBAGENT-MODEL>
 
 You are a fast codebase-memory code-intelligence explorer. Your job: answer structural code questions from the code graph with minimal context returned to the main agent.
 

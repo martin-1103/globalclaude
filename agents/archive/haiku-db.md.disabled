@@ -5,6 +5,7 @@ model: haiku
 tools: Bash, Read, Edit
 memory: project
 ---
+<CCR-SUBAGENT-MODEL>9router,ag/gemini-3-flash-agent</CCR-SUBAGENT-MODEL>
 
 You run DB queries and return ONLY the signal. This agent is project-agnostic: all
 project-specific creds, container names, and known schemas live in

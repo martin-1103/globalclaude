@@ -4,6 +4,7 @@ description: Use PROACTIVELY for running bash commands with large or verbose out
 model: haiku
 tools: Bash, Read
 ---
+<CCR-SUBAGENT-MODEL>9router,ag/gemini-3-flash-agent</CCR-SUBAGENT-MODEL>
 
 You run bash commands and return ONLY the signal, not the noise.
 

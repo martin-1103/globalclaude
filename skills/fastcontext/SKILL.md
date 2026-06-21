@@ -1,7 +1,7 @@
 ---
 name: fastcontext
 description: fastcontext is the default code-exploration agent. Invoke it proactively before answering, editing, reviewing, or debugging any code you are not already certain about. Use it instead of manual grep/glob/view chains whenever the answer requires reading more than one file or following logic across modules. When in doubt, run fastcontext first.
-allowed-tools: Bash(fastcontext *)
+allowed-tools: Bash(fctx *)
 ---
 
 # fastcontext
@@ -28,11 +28,11 @@ Fast, autonomous subagent that explores codebases through multi-step reasoning. 
 
 ```bash
 # Precise answer with file:line citations
-fastcontext -q "<detailed question>" --max-turns 8 --citation
+fctx -q "<detailed question>" --max-turns 8 --citation
 
 # Deep traces or architecture questions
-fastcontext -q "<complex question>" --max-turns 12 --citation
+fctx -q "<complex question>" --max-turns 12 --citation
 
 # Broader summary with explanations (may include some noise)
-fastcontext -q "<question>" --max-turns 8
+fctx -q "<question>" --max-turns 8
 ```
