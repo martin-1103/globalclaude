@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""reasonix-wrap — run ONE reasonix coding task, emit a COMPACT DETERMINISTIC summary.
+
+No LLM summarization: pure parsing of reasonix stdout + the -metrics JSON.
+Stdlib only. The caller (a subagent) sees a small fixed-size summary instead of
+verbose reasonix stdout, so context does not grow linearly with step count.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+# dim block opener used by reasonix for reasoning lines
+DIM_OPEN = '\x1b[2m'
+TOOLCALL_RE = re.compile(r'^\s*->\s*(\S+)\s*(.*)$')
+# per-step metric/boundary line:  "  · <N> tok · in ... · out ... · ¥COST"
+STEP_RE = re.compile(r'^\s*·\s.*\btok\b')
+ANOMALY_PATTERNS = [
+    'error', 'fail', 'retry', 'blocked', 'anchor not unique',
+    'verdict=block', 'exit 1', 'exit code 1',
+]
+
+
+def strip_ansi(s):
+    return ANSI_RE.sub('', s)
+
+
+def run(cmd, cwd=None):
+    """Run a command, return (rc, stdout_text). For short fixed-output probes."""
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        return p.returncode, (p.stdout or '') + (p.stderr or '')
+    except Exception as e:
+        return 127, str(e)
+
+
+def git_head(repo):
+    rc, out = run(['git', '-C', repo, 'rev-parse', 'HEAD'])
+    if rc == 0:
+        return out.strip()
+    return None
+
+
+def git_changed_set(repo):
+    """Set of relative paths currently changed (tracked diff + untracked)."""
+    touched = set()
+    rc, out = run(['git', '-C', repo, 'status', '--porcelain'])
+    if rc != 0:
+        return None  # not a git repo
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        # porcelain: XY <path>  (rename: XY old -> new)
+        path = line[3:] if len(line) > 3 else line.strip()
+        if ' -> ' in path:
+            path = path.split(' -> ', 1)[1]
+        touched.add(path.strip().strip('"'))
+    return touched
+
+
+def git_diff_names(repo):
+    rc, out = run(['git', '-C', repo, 'diff', '--name-only'])
+    if rc != 0:
+        return set()
+    return {l.strip() for l in out.splitlines() if l.strip()}
+
+
+BOUNDS_IGNORE_DIRS = {'.reasonix-runs', '.codegraph', '.git'}
+
+
+def normalize(p):
+    p = os.path.normpath(p.strip())
+    if p.startswith('./'):
+        p = p[2:]
+    return p
+
+
+def mtime_touched(repo, since_ts, files):
+    """Fallback (non-git): which of the declared files changed after since_ts,
+    plus a flag if we genuinely cannot detect out-of-bounds without git."""
+    touched = set()
+    for f in files:
+        fp = os.path.join(repo, f)
+        try:
+            if os.path.getmtime(fp) >= since_ts:
+                touched.add(normalize(f))
+        except OSError:
+            pass
+    return touched
+
+
+def parse_stdout(lines):
+    """lines: raw (ANSI-containing) stdout lines. Returns parse dict."""
+    tools = {}
+    step_count = 0
+    anomalies = []
+    anomaly_overflow = 0
+    last_toolcall = None
+    # plain-text answer tracking: last contiguous block of non-dim,
+    # non-marker plain text.
+    answer_block = []
+    cur_block = []
+    in_dim = False
+
+    for raw in lines:
+        # track dim state across the line for reasoning detection
+        had_dim = DIM_OPEN in raw
+        clean = strip_ansi(raw).rstrip('\n')
+        stripped = clean.strip()
+
+        # step boundary metric line
+        if STEP_RE.match(clean):
+            step_count += 1
+            # a metric line ends a plain-text block too
+            if cur_block:
+                answer_block = cur_block
+                cur_block = []
+            continue
+
+        # tool call line
+        m = TOOLCALL_RE.match(clean)
+        if m:
+            name = m.group(1)
+            tools[name] = tools.get(name, 0) + 1
+            last_toolcall = stripped
+            if cur_block:
+                answer_block = cur_block
+                cur_block = []
+            continue
+
+        # thinking marker / reasoning
+        low = stripped.lower()
+        if stripped.startswith('▎') or low.startswith('thinking'):
+            in_dim = True
+            if cur_block:
+                answer_block = cur_block
+                cur_block = []
+            continue
+
+        # anomaly scan (on clean text, any line)
+        for pat in ANOMALY_PATTERNS:
+            if pat in low:
+                if len(anomalies) < 10:
+                    anomalies.append(stripped)
+                else:
+                    anomaly_overflow += 1
+                break
+
+        # dim / reasoning content is not part of the answer
+        if had_dim:
+            in_dim = True
+            continue
+
+        if not stripped:
+            # blank line: keep current block contiguous-ish but a blank ends it
+            if cur_block:
+                answer_block = cur_block
+                cur_block = []
+            in_dim = False
+            continue
+
+        # plain, non-dim, non-marker text → candidate answer
+        in_dim = False
+        cur_block.append(stripped)
+
+    if cur_block:
+        answer_block = cur_block
+
+    answer = ' '.join(answer_block).strip()
+    return {
+        'tools': tools,
+        'step_count': step_count,
+        'anomalies': anomalies,
+        'anomaly_overflow': anomaly_overflow,
+        'last_toolcall': last_toolcall,
+        'answer': answer,
+    }
+
+
+def load_metrics(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def fmt_tools(tools):
+    if not tools:
+        return '(none)'
+    items = sorted(tools.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ' · '.join(f'{c} {n}' for n, c in items)
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        prog='reasonix-wrap',
+        description='Run one reasonix coding task and emit a compact deterministic summary.',
+    )
+    ap.add_argument('repo', help='path to the target repo')
+    ap.add_argument('task_change_text', help='the coding task / change description')
+    ap.add_argument('--files', required=True,
+                    help='comma-separated list of files reasonix may create/edit')
+    ap.add_argument('--verify', required=True,
+                    help='shell command to verify the change (cwd=repo)')
+    ap.add_argument('--model', type=str, default='deepseek-pro',
+                    help='reasonix provider name (default: deepseek-pro = max effort; use deepseek-pro-high for medium, deepseek-flash for light tasks)')
+    ap.add_argument('--max-steps', type=int, default=None,
+                    help='cap reasonix steps (passed through as -max-steps)')
+    ap.add_argument('--steps', action='store_true',
+                    help='also print one line per step after the summary')
+    ap.add_argument('--full', action='store_true',
+                    help='also dump the raw log to stdout')
+    args = ap.parse_args()
+
+    repo = os.path.abspath(args.repo)
+    files = [normalize(f) for f in args.files.split(',') if f.strip()]
+    files_set = set(files)
+
+    # 1. rollback ref + baseline changed set
+    head_ref = git_head(repo)
+    is_git = head_ref is not None
+    baseline_changed = git_changed_set(repo) if is_git else None
+    start_ts = time.time()
+
+    # 2. build prompt
+    prompt = (
+        args.task_change_text
+        + "\n\nConstraint: only create or edit these files: "
+        + ', '.join(files)
+        + ". Do not modify other files."
+    )
+
+    # tmp metrics file
+    runs_dir = os.path.join(repo, '.reasonix-runs')
+    os.makedirs(runs_dir, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    log_path = os.path.join(runs_dir, f'{ts}.log')
+    metrics_path = os.path.join(runs_dir, f'{ts}.metrics.json')
+
+    argv = ['reasonix', 'run', '-dir', repo, '-metrics', metrics_path]
+    if args.model is not None:
+        argv += ['-model', args.model]
+    if args.max_steps is not None:
+        argv += ['-max-steps', str(args.max_steps)]
+    argv.append(prompt)
+
+    # 3. run, tee stdout+stderr live to log, keep lines for parsing
+    captured = []
+    try:
+        proc = subprocess.Popen(
+            argv, cwd=repo,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+    except FileNotFoundError:
+        print('reasonix-wrap: error: `reasonix` not found on PATH', file=sys.stderr)
+        sys.exit(2)
+
+    with open(log_path, 'w') as logf:
+        for line in proc.stdout:
+            logf.write(line)
+            logf.flush()
+            captured.append(line)
+    proc.wait()
+    walltime = round(time.time() - start_ts, 1)
+
+    # 4. verify
+    vproc = subprocess.run(args.verify, shell=True, cwd=repo,
+                           capture_output=True, text=True)
+    verify_pass = (vproc.returncode == 0)
+    vout = (vproc.stdout or '') + (vproc.stderr or '')
+    verify_tail = '\n'.join(vout.splitlines()[-20:])
+
+    # 5. soft boundary check
+    out_of_bounds = False
+    offenders = []
+    if is_git:
+        touched = {normalize(p) for p in (git_diff_names(repo) | (git_changed_set(repo) or set()))}
+        # exclude paths already dirty at baseline (not produced by this run)
+        base = {normalize(p) for p in (baseline_changed or set())}
+        touched_new = touched - base
+        # but still report all touched files; bounds check on the run-attributable set
+        check_set = touched_new if touched_new else touched
+        boundary_note = ''
+    else:
+        touched = mtime_touched(repo, start_ts, files)
+        check_set = touched
+        boundary_note = ' (no-git: mtime check, out-of-bounds undetectable)'
+
+    def _is_ignored(p):
+        """True if p is a tooling artifact that must not be treated as a user edit."""
+        top = p.split('/')[0] if '/' in p else p
+        return top in BOUNDS_IGNORE_DIRS
+
+    for p in sorted(check_set):
+        if _is_ignored(p):
+            continue
+        if p not in files_set:
+            out_of_bounds = True
+            offenders.append(p)
+
+    touched_display = sorted(x for x in check_set if not _is_ignored(x))
+
+    # 6. parse stdout
+    parsed = parse_stdout(captured)
+
+    # 7. metrics
+    metrics = load_metrics(metrics_path)
+    if metrics:
+        steps = metrics.get('steps', parsed['step_count'])
+        prompt_tok = metrics.get('prompt_tokens', 0)
+        comp_tok = metrics.get('completion_tokens', 0)
+        cache_hit = metrics.get('cache_hit_tokens', 0)
+        cache_miss = metrics.get('cache_miss_tokens', 0)
+        cost = metrics.get('cost', 0)
+        currency = metrics.get('currency', '')
+    else:
+        steps = parsed['step_count']
+        prompt_tok = comp_tok = cache_hit = cache_miss = 0
+        cost = 0
+        currency = ''
+
+    total_tok = prompt_tok + comp_tok
+    cache_base = cache_hit + cache_miss
+    cache_pct = round(100 * cache_hit / cache_base) if cache_base else 0
+
+    # 8. status
+    if out_of_bounds:
+        status, code = 'out_of_bounds', 4
+    elif not verify_pass:
+        status, code = 'failed', 3
+    else:
+        status, code = 'done', 0
+
+    # ── summary ──
+    anomalies = parsed['anomalies']
+    anom_n = len(anomalies) + parsed['anomaly_overflow']
+    if anomalies:
+        anom_str = ' | '.join(anomalies)
+        if parsed['anomaly_overflow']:
+            anom_str += f' (+{parsed["anomaly_overflow"]} more)'
+    else:
+        anom_str = 'none'
+
+    answer = parsed['answer']
+    if len(answer) > 500:
+        answer = answer[:500] + '…'
+
+    files_line = ', '.join(touched_display) if touched_display else '(none detected)'
+    if boundary_note:
+        files_line += boundary_note
+    if out_of_bounds:
+        files_line += f'   [⚠ OUT OF BOUNDS: {", ".join(offenders)}]'
+
+    cost_str = f'{currency}{cost}'
+    model_str = f' · model={args.model}' if args.model else ''
+    print(f'── reasonix · STATUS={status} · {steps} steps · {total_tok} tok '
+          f'({cache_pct}% cached) · {cost_str} · {walltime}s{model_str} ──')
+    print(f'tools: {fmt_tools(parsed["tools"])}')
+    print(f'last: {parsed["last_toolcall"] or "(none)"}')
+    print(f'anomalies ({anom_n}): {anom_str}')
+    print(f'files touched: {files_line}')
+    print(f'verify: {"PASS" if verify_pass else "FAIL"} ({args.verify})')
+    if not verify_pass and verify_tail.strip():
+        print(f'  verify tail:\n    ' + verify_tail.replace('\n', '\n    '))
+    print(f'answer: {answer}')
+    print(f'raw: {log_path}')
+    print(f'STATUS={status}')
+
+    # --steps: one line per step
+    if args.steps:
+        print('── steps ──')
+        n = 0
+        for raw in captured:
+            clean = strip_ansi(raw).rstrip('\n')
+            m = TOOLCALL_RE.match(clean)
+            if m:
+                n += 1
+                name = m.group(1)
+                a = m.group(2).strip()
+                if len(a) > 120:
+                    a = a[:120] + '…'
+                print(f'step {n}: {name} {a}')
+
+    # --full: dump raw log
+    if args.full:
+        print('── raw log ──')
+        try:
+            with open(log_path) as f:
+                sys.stdout.write(f.read())
+        except OSError:
+            pass
+
+    sys.exit(code)
+
+
+if __name__ == '__main__':
+    main()
