@@ -14,6 +14,31 @@ Tools available inside the loop:
 - `list_containers` — list running Docker containers (via gasslog.sh)
 - `container_logs` — filtered container logs (via gasslog.sh): SIGNAL mode (errors/warns only), ALL mode, or regex content search
 
+## When NOT to Use
+
+- **Reasoning/causation questions** — agent-log is FETCH only. Never ask "kenapa error naik?" or "apa penyebab X?"; it returns log lines, not root causes. Ask "count ERROR per jam, 3 jam terakhir, service=X" — you reason from the numbers.
+- **DB queries** — use `agent-db` instead; agent-log has no database access.
+- **Events not in VictoriaLogs or Docker** — agent-log only reaches VictoriaLogs (`http://localhost:9428`) and Docker container logs via gasslog.sh. External log platforms, files, or metrics are out of scope.
+- **Bulk export** — `limit` caps at 500 lines per query_vlogs call. Not suitable for downloading full log archives.
+
+## End-to-end example
+
+```
+# Count errors per hour across two services
+agent-log "count ERROR per hour last 3 hours for service api-gateway and service sync-service"
+
+# Check recent container crash markers
+agent-log "any OOMKilled or panic in report-worker container last 30 minutes"
+
+# Override VictoriaLogs URL for a different environment
+agent-log --vlogs http://staging:9428 "level:error last 1h"
+
+# Full trace for debugging
+agent-log --verbose "what errors hit webhook-ingestion in the last 2 hours"
+```
+
+For independent service/window queries, emit two `Bash(...)` calls in one response — they run concurrently.
+
 ## Usage from main agent
 
 ```bash

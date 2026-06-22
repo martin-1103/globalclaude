@@ -21,6 +21,26 @@ agent-db --project /path/to/project "your natural language question"
 
 `--project` defaults to cwd. agent-db resolves per-project config from `/var/pile/agent-db/projects/<slug>/config.json`.
 
+## When NOT to Use
+
+- **Reasoning/causation questions** — agent-db is FETCH only. Never ask "why did X fail" or "what caused Y"; it returns data rows, not root causes. Framing "kenapa?" to agent-db causes fabricated answers. Ask for counts/rows, then reason yourself.
+- **Log queries** — use `agent-log` instead; agent-db has no VictoriaLogs or Docker log access.
+- **Schema already known** — if context.md already has the table/column, skip agent-db and query directly.
+- **Non-DB data sources** — agent-db only reaches ClickHouse, MySQL, Redis, Postgres via `docker exec`. Not HTTP APIs, not files.
+
+## End-to-end example
+
+```
+# Check how many sync jobs failed in the last hour
+agent-db --project /www/wwwroot/gass/be "select count(*), error_code from sync_jobs where created_at > now()-interval 1 hour and status='failed' group by error_code"
+
+# Returns: answer text with counts
+# Verbose to see which queries the agent ran:
+agent-db --project /www/wwwroot/gass/be --verbose "berapa order gagal hari ini"
+```
+
+For independent questions, emit two `Bash(...)` calls in one response — they run concurrently.
+
 ## When to call
 
 Call `Bash("agent-db --project /path/to/project 'question'")` directly from main agent — the hook allows this command through (not blocked by gather guard). No subagent wrapper needed.
