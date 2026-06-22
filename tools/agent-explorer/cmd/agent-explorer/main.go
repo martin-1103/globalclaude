@@ -15,10 +15,12 @@ import (
 	"time"
 
 	"agent-explorer/internal/config"
+	"agent-explorer/internal/audit"
 	"agent-explorer/internal/explorer"
 	"agent-explorer/internal/format"
 	"agent-explorer/internal/learning"
 	"agent-explorer/internal/llm"
+	"agent-explorer/internal/logs"
 	"agent-explorer/internal/planner"
 	"agent-explorer/internal/tools"
 )
@@ -353,11 +355,33 @@ func runAsk(args []string) error {
 	if *query == "" {
 		return fmt.Errorf("--query required")
 	}
-
-	runtime, err := config.LoadRuntime(*configPath, *repo)
+	baseDir := "/var/pile/agent-explorer/data"
+	runDir, err := audit.EnsureRunDir(baseDir, *repo, *query)
 	if err != nil {
 		return err
 	}
+	_ = logs.SaveStartedIndex(baseDir, *repo, runDir, *query, "")
+
+	runtime, err := config.LoadRuntime(*configPath, *repo)
+	if err != nil {
+		_ = logs.SaveFailedBootstrap(baseDir, *repo, runDir, *query, "", logs.AskRequest{
+			Command:        "ask",
+			RunDir:         runDir,
+			Repo:           *repo,
+			Query:          *query,
+			ConfigPath:     *configPath,
+			JSONMode:       *jsonMode,
+			TimeoutSeconds: *timeoutSeconds,
+		}, err)
+		return err
+	}
+	if runtime.Config.MemoryDir != baseDir {
+		runDir, err = audit.EnsureRunDir(runtime.Config.MemoryDir, *repo, *query)
+		if err != nil {
+			return err
+		}
+	}
+	_ = logs.SaveStartedIndex(runtime.Config.MemoryDir, *repo, runDir, *query, "")
 	if *parallelRetrieval {
 		runtime.Config.ParallelRetrieval = true
 	}
@@ -368,8 +392,23 @@ func runAsk(args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeoutSeconds)*time.Second)
 	defer cancel()
+	ctx = audit.WithLLMLogger(ctx, audit.NewLLMLogger(runDir))
 
 	result, err := exp.Run(ctx, *repo, *query, *explainMode)
+	_, _ = logs.SaveAskRun(runtime.Config.MemoryDir, logs.AskRequest{
+		Command:           "ask",
+		RunDir:            runDir,
+		Repo:              *repo,
+		Query:             *query,
+		ConfigPath:        *configPath,
+		Explain:           *explainMode,
+		JSONMode:          *jsonMode,
+		AgentMode:         *agentMode,
+		MainAgentMode:     *mainAgentMode,
+		DebugRetrieval:    *debugRetrieval,
+		ParallelRetrieval: runtime.Config.ParallelRetrieval,
+		TimeoutSeconds:    *timeoutSeconds,
+	}, result, err)
 	if err != nil {
 		return err
 	}
@@ -405,13 +444,39 @@ func runTrace(args []string) error {
 	if *symbol == "" && *query == "" {
 		return fmt.Errorf("--symbol or --query required")
 	}
+	baseDir := "/var/pile/agent-explorer/data"
+	runDir, err := audit.EnsureRunDir(baseDir, *repo, nonEmpty(*symbol, *query))
+	if err != nil {
+		return err
+	}
+	_ = logs.SaveStartedIndex(baseDir, *repo, runDir, *query, *symbol)
 
 	runtime, err := config.LoadRuntime(*configPath, *repo)
 	if err != nil {
+		_ = logs.SaveFailedBootstrap(baseDir, *repo, runDir, *query, *symbol, logs.TraceRequest{
+			Command:        "trace",
+			RunDir:         runDir,
+			Repo:           *repo,
+			Symbol:         *symbol,
+			Query:          *query,
+			Direction:      *direction,
+			Depth:          *depth,
+			ConfigPath:     *configPath,
+			JSONMode:       *jsonMode,
+			TimeoutSeconds: *timeoutSeconds,
+		}, err)
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeoutSeconds)*time.Second)
 	defer cancel()
+	if runtime.Config.MemoryDir != baseDir {
+		runDir, err = audit.EnsureRunDir(runtime.Config.MemoryDir, *repo, nonEmpty(*symbol, *query))
+		if err != nil {
+			return err
+		}
+	}
+	_ = logs.SaveStartedIndex(runtime.Config.MemoryDir, *repo, runDir, *query, *symbol)
+	ctx = audit.WithLLMLogger(ctx, audit.NewLLMLogger(runDir))
 
 	target := *symbol
 	if target == "" {
@@ -423,6 +488,18 @@ func runTrace(args []string) error {
 	}
 
 	result, err := tools.TracePath(ctx, *repo, runtime.Config.CBMBinary, runtime.Config.CBMCacheDir, target, *direction, *depth, "calls", runtime.Config.ToolTimeoutSeconds)
+	_, _ = logs.SaveTraceRun(runtime.Config.MemoryDir, logs.TraceRequest{
+		Command:        "trace",
+		RunDir:         runDir,
+		Repo:           *repo,
+		Symbol:         target,
+		Query:          *query,
+		Direction:      *direction,
+		Depth:          *depth,
+		ConfigPath:     *configPath,
+		JSONMode:       *jsonMode,
+		TimeoutSeconds: *timeoutSeconds,
+	}, result, err)
 	if err != nil {
 		return err
 	}

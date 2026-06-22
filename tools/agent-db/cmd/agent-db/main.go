@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"agent-db/internal/agent"
@@ -13,6 +15,7 @@ import (
 	"agent-db/internal/db"
 	"agent-db/internal/format"
 	"agent-db/internal/llm"
+	"agent-db/internal/logs"
 )
 
 func main() {
@@ -60,7 +63,7 @@ func main() {
 	}
 }
 
-func run(configPath, projectDir, query string, jsonMode bool, verbose bool, timeoutSeconds int) error {
+func run(configPath, projectDir, query string, jsonMode bool, verbose bool, timeoutSeconds int) (runErr error) {
 	dir := projectDir
 	if dir == "" {
 		cwd, err := os.Getwd()
@@ -69,6 +72,47 @@ func run(configPath, projectDir, query string, jsonMode bool, verbose bool, time
 		}
 		dir = cwd
 	}
+	startedAt := time.Now().UTC()
+	runDir, err := logs.EnsureRunDir(dir, query)
+	if err != nil {
+		return err
+	}
+	req := logs.Request{
+		Command:        "query",
+		RunDir:         runDir,
+		ProjectDir:     dir,
+		ConfigPath:     configPath,
+		Query:          query,
+		JSONMode:       jsonMode,
+		Verbose:        verbose,
+		TimeoutSeconds: timeoutSeconds,
+		StartedAt:      startedAt.Format(time.RFC3339),
+	}
+	if err := logs.SaveStarted(runDir, req); err != nil {
+		return err
+	}
+	finalized := false
+	var res agent.Result
+	defer func() {
+		if finalized {
+			return
+		}
+		finishedAt := time.Now().UTC()
+		if rec := recover(); rec != nil {
+			err := fmt.Errorf("panic: %v", rec)
+			summary := logs.BuildSummary("failed", query, startedAt, finishedAt, res.Turns, len(res.Steps), lastIntent(res.Steps), res.Answer, res.MaxTurns, err)
+			_ = logs.SaveFailure(runDir, req, err, summary)
+			panic(rec)
+		}
+		if runErr != nil {
+			summary := logs.BuildSummary("failed", query, startedAt, finishedAt, res.Turns, len(res.Steps), lastIntent(res.Steps), res.Answer, res.MaxTurns, runErr)
+			_ = logs.SaveFailure(runDir, req, runErr, summary)
+			return
+		}
+		err := fmt.Errorf("process exited before success finalize")
+		summary := logs.BuildSummary("failed", query, startedAt, finishedAt, res.Turns, len(res.Steps), lastIntent(res.Steps), res.Answer, res.MaxTurns, err)
+		_ = logs.SaveFailure(runDir, req, err, summary)
+	}()
 
 	cfg, err := config.Load(configPath, dir)
 	if err != nil {
@@ -85,13 +129,22 @@ func run(configPath, projectDir, query string, jsonMode bool, verbose bool, time
 			timeoutSeconds = 300
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(baseCtx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
+	ctx = logs.WithLLMLogger(ctx, logs.NewLLMLogger(runDir))
 
-	res, err := ag.Run(ctx, query)
+	res, err = ag.Run(ctx, query)
 	if err != nil {
 		return err
 	}
+	summary := logs.BuildSummary("ok", query, startedAt, time.Now().UTC(), res.Turns, len(res.Steps), lastIntent(res.Steps), res.Answer, res.MaxTurns, nil)
+	if err := logs.SaveSuccess(runDir, req, res, summary); err != nil {
+		return err
+	}
+	finalized = true
+	_ = logs.Prune(dir, 50, 14*24*time.Hour)
 
 	if jsonMode {
 		body, err := format.JSON(res)
@@ -104,6 +157,15 @@ func run(configPath, projectDir, query string, jsonMode bool, verbose bool, time
 
 	fmt.Println(format.Human(res, verbose))
 	return nil
+}
+
+func lastIntent(steps []agent.Step) string {
+	for i := len(steps) - 1; i >= 0; i-- {
+		if strings.TrimSpace(steps[i].Intent) != "" {
+			return steps[i].Intent
+		}
+	}
+	return ""
 }
 
 func runInit(args []string) error {

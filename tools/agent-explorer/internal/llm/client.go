@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-explorer/internal/audit"
 	"agent-explorer/internal/config"
 )
 
@@ -57,6 +58,7 @@ func New(cfg config.Config) *Client {
 }
 
 func (c *Client) Chat(ctx context.Context, systemPrompt string, userPrompt string) (string, error) {
+	start := time.Now()
 	reqBody := chatRequest{
 		Model: c.model,
 		Messages: []Message{
@@ -80,30 +82,68 @@ func (c *Client) Chat(ctx context.Context, systemPrompt string, userPrompt strin
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		appendLLMLog(ctx, c.model, reqBody, nil, 0, err, time.Since(start).Milliseconds())
 		return "", fmt.Errorf("request llm: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		appendLLMLog(ctx, c.model, reqBody, nil, resp.StatusCode, err, time.Since(start).Milliseconds())
 		return "", fmt.Errorf("read llm response: %w", err)
 	}
 	if resp.StatusCode >= 300 {
+		appendLLMLog(ctx, c.model, reqBody, map[string]any{"body": audit.Redact(string(respBody), 1000)}, resp.StatusCode, fmt.Errorf("llm status %d", resp.StatusCode), time.Since(start).Milliseconds())
 		return "", fmt.Errorf("llm status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") || bytes.HasPrefix(bytes.TrimSpace(respBody), []byte("data:")) {
-		return parseStreamingResponse(respBody)
+		out, err := parseStreamingResponse(respBody)
+		appendLLMLog(ctx, c.model, reqBody, map[string]any{"content": audit.Redact(out, 1000), "stream": true}, resp.StatusCode, err, time.Since(start).Milliseconds())
+		return out, err
 	}
 
 	var parsed chatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		appendLLMLog(ctx, c.model, reqBody, map[string]any{"body": audit.Redact(string(respBody), 1000)}, resp.StatusCode, err, time.Since(start).Milliseconds())
 		return "", fmt.Errorf("parse llm response: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
+		appendLLMLog(ctx, c.model, reqBody, map[string]any{"choices": 0}, resp.StatusCode, fmt.Errorf("llm returned no choices"), time.Since(start).Milliseconds())
 		return "", fmt.Errorf("llm returned no choices")
 	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
+	out := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	appendLLMLog(ctx, c.model, reqBody, map[string]any{"content": audit.Redact(out, 1000)}, resp.StatusCode, nil, time.Since(start).Milliseconds())
+	return out, nil
+}
+
+func appendLLMLog(ctx context.Context, model string, req chatRequest, resp map[string]any, status int, err error, durationMs int64) {
+	logger := audit.FromContext(ctx)
+	if logger == nil {
+		return
+	}
+	entry := audit.LLMEntry{
+		Model:      model,
+		Request:    map[string]any{"messages": previewMessages(req.Messages), "temperature": req.Temperature},
+		Response:   resp,
+		HTTPStatus: status,
+		DurationMs: durationMs,
+	}
+	if err != nil {
+		entry.Error = err.Error()
+	}
+	_ = logger.Append(entry)
+}
+
+func previewMessages(items []Message) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, map[string]any{
+			"role":    item.Role,
+			"content": audit.Preview(item.Content, 140),
+		})
+	}
+	return out
 }
 
 func parseStreamingResponse(respBody []byte) (string, error) {

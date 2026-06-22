@@ -47,7 +47,42 @@ func main() {
 	}
 }
 
-func run(configPath, vlogsURL, query string, jsonMode bool, verbose bool, timeoutSeconds int) error {
+func run(configPath, vlogsURL, query string, jsonMode bool, verbose bool, timeoutSeconds int) (runErr error) {
+	startedAt := time.Now().UTC()
+	runDir, err := logs.EnsureRunDir(query)
+	if err != nil {
+		return err
+	}
+	req := logs.Request{
+		Query:          query,
+		StartedAt:      startedAt.Format(time.RFC3339),
+		TimeoutSeconds: timeoutSeconds,
+		Verbose:        verbose,
+		JSONMode:       jsonMode,
+	}
+	if err := logs.SaveStarted(runDir, req); err != nil {
+		return err
+	}
+	finalized := false
+	var res agent.Result
+	defer func() {
+		if finalized {
+			return
+		}
+		finishedAt := time.Now().UTC()
+		if rec := recover(); rec != nil {
+			err := fmt.Errorf("panic: %v", rec)
+			_ = logs.SaveFailure(runDir, req, err, res.Turns, res.MaxTurns, startedAt, finishedAt)
+			panic(rec)
+		}
+		if runErr != nil {
+			_ = logs.SaveFailure(runDir, req, runErr, res.Turns, res.MaxTurns, startedAt, finishedAt)
+			return
+		}
+		err := fmt.Errorf("process exited before success finalize")
+		_ = logs.SaveFailure(runDir, req, err, res.Turns, res.MaxTurns, startedAt, finishedAt)
+	}()
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -70,10 +105,17 @@ func run(configPath, vlogsURL, query string, jsonMode bool, verbose bool, timeou
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
-	res, err := ag.Run(ctx, query)
+	res, err = ag.Run(ctx, query)
 	if err != nil {
 		return err
 	}
+
+	finishedAt := time.Now().UTC()
+	if err := logs.SaveSuccess(runDir, req, res.Answer, res.Turns, res.MaxTurns, startedAt, finishedAt); err != nil {
+		return err
+	}
+	finalized = true
+	_ = logs.Prune(50, 14*24*time.Hour)
 
 	if jsonMode {
 		body, err := format.JSON(res)

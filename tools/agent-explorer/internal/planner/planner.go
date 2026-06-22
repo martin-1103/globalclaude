@@ -70,6 +70,7 @@ Valid intent: "definition", "callers", "behavior", "literal", "structure", "mixe
 Valid answer_style: "citation_only", "brief_with_citations".
 
 Planning policy:
+- Outcome first. Choose tools and strategy by what is most likely to answer the query, not by keyword surface match or hit count maximization.
 - Precision first. Choose narrowest likely-correct tool before broad recall tool.
 - Max 2 tool families before stop or replan.
 - Fallback only when confidence from primary tool likely low.

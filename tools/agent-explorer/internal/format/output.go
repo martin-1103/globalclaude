@@ -26,12 +26,14 @@ func FinalAnswer(result explorer.Result, citationOnly bool, agentMode bool, main
 		b.WriteString(result.Explanation)
 		b.WriteString("\n")
 	}
-	b.WriteString("Retrieval Pack:\n")
-	b.WriteString("Status: ")
-	b.WriteString(retrievalStatus(result.Hits))
+	meta := contractMeta(result)
+	b.WriteString("Retrieval Pack\n")
+	b.WriteString(fmt.Sprintf("Status: %s | Planner: %s | Answerability: %s\n", meta.Status, meta.PlannerStatus, meta.Answerability))
+	b.WriteString(fmt.Sprintf("Confidence: %s (top=%s) | Action: %s\n", meta.ConfidenceBand, meta.TopConfidence, meta.RecommendedAction))
+	b.WriteString(fmt.Sprintf("Intent: %s | Primary: %s\n", nonEmpty(result.Plan.Intent, "unknown"), nonEmpty(result.Plan.PrimaryTool, "unknown")))
+	b.WriteString("Quality Flags: ")
+	b.WriteString(strings.Join(meta.QualityFlags, ", "))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("Intent: %s\n", nonEmpty(result.Plan.Intent, "unknown")))
-	b.WriteString(fmt.Sprintf("Primary: %s\n", nonEmpty(result.Plan.PrimaryTool, "unknown")))
 	terms := compactTerms(result.Plan.SearchTerms)
 	if len(terms) != 0 {
 		b.WriteString("Terms: ")
@@ -46,6 +48,11 @@ func FinalAnswer(result explorer.Result, citationOnly bool, agentMode bool, main
 	b.WriteString("Top Hits:\n")
 	writeEvidenceSection(&b, result.PrimaryHits, "Primary", 3)
 	writeEvidenceSection(&b, result.SupportingHits, "Supporting", 2)
+	if summary := traceSummary(result.TraceHits); summary != "" {
+		b.WriteString("Trace Summary:\n")
+		b.WriteString(summary)
+		b.WriteString("\n")
+	}
 	writeEvidenceSection(&b, result.TraceHits, "Trace", 2)
 	if len(result.Hits) == 0 {
 		b.WriteString("none\n")
@@ -60,7 +67,7 @@ func FinalAnswer(result explorer.Result, citationOnly bool, agentMode bool, main
 	}
 	if debugRetrieval && len(result.Suppressed) != 0 {
 		b.WriteString("Suppressed:\n")
-		for i, hit := range result.Suppressed {
+		for i, hit := range uniqueDisplayHits(result.Suppressed) {
 			if i >= 4 {
 				break
 			}
@@ -74,6 +81,7 @@ func FinalAnswer(result explorer.Result, citationOnly bool, agentMode bool, main
 func Trace(result tools.TraceResult) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Trace: %s (%s)\n", result.Symbol, result.Direction))
+	b.WriteString(fmt.Sprintf("Summary: callers=%d callees=%d\n", len(result.Callers), len(result.Callees)))
 	if len(result.Callers) != 0 {
 		b.WriteString("Callers:\n")
 		for _, step := range result.Callers {
@@ -111,7 +119,7 @@ func JSON(v any) (string, error) {
 func citationBlock(hits []tools.Hit) string {
 	var b strings.Builder
 	b.WriteString("<final_answer>\n")
-	for _, hit := range hits {
+	for _, hit := range limitCitations(hits, len(hits)) {
 		b.WriteString(fmt.Sprintf("%s:%d-%d", hit.File, hit.LineStart, hit.LineEnd))
 		if hit.Symbol != "" {
 			b.WriteString(fmt.Sprintf(" (%s)", hit.Symbol))
@@ -157,8 +165,13 @@ func agentAnswer(result explorer.Result, debugRetrieval bool) string {
 		b.WriteString(result.Explanation)
 		b.WriteString("\n")
 	}
+	meta := contractMeta(result)
 	b.WriteString("retrieval_pack\n")
-	b.WriteString("status=" + retrievalStatus(result.Hits))
+	b.WriteString("status=" + meta.Status)
+	b.WriteString(" planner_status=" + meta.PlannerStatus)
+	b.WriteString(" answerability=" + meta.Answerability)
+	b.WriteString(" confidence_band=" + meta.ConfidenceBand)
+	b.WriteString(" top_confidence=" + meta.TopConfidence)
 	b.WriteString(" primary=" + nonEmpty(result.Plan.PrimaryTool, "unknown"))
 	if lane := dominantLane(result.Hits); lane != "" {
 		b.WriteString(" lane=" + lane)
@@ -167,14 +180,18 @@ func agentAnswer(result explorer.Result, debugRetrieval bool) string {
 	if len(terms) != 0 {
 		b.WriteString(" terms=" + strings.Join(terms, "|"))
 	}
+	b.WriteString(" quality_flags=" + strings.Join(meta.QualityFlags, ","))
 	b.WriteString("\n")
 	idx := 1
 	idx = writeCompactEvidence(&b, idx, result.PrimaryHits, 3)
 	idx = writeCompactEvidence(&b, idx, result.SupportingHits, 1)
 	_ = writeCompactEvidence(&b, idx, result.TraceHits, 2)
+	if summary := inlineTraceSummary(result.TraceHits); summary != "" {
+		b.WriteString("trace_summary=" + summary + "\n")
+	}
 	if debugRetrieval && len(result.Suppressed) != 0 {
 		b.WriteString("Suppressed: ")
-		for i, hit := range result.Suppressed {
+		for i, hit := range uniqueDisplayHits(result.Suppressed) {
 			if i >= 3 {
 				break
 			}
@@ -196,23 +213,31 @@ func mainAgentAnswer(result explorer.Result) string {
 		primary = limitCitations(result.Hits, 2)
 	}
 	supporting := result.SupportingHits
-	if len(supporting) == 0 && len(result.Hits) > len(primary) {
-		supporting = limitCitations(result.Hits[len(primary):], 1)
+	if len(supporting) == 0 {
+		supporting = fallbackSupportingHits(result.Hits, primary, 1)
 	}
+	meta := contractMeta(result)
 	b.WriteString("retrieval_contract\n")
-	status := retrievalStatus(result.Hits)
-	confidence := topConfidence(result.Hits)
-	b.WriteString("status=" + status)
+	b.WriteString("status=" + meta.Status)
+	b.WriteString(" planner_status=" + meta.PlannerStatus)
+	b.WriteString(" answerability=" + meta.Answerability)
 	b.WriteString(" intent=" + nonEmpty(result.Plan.Intent, "unknown"))
 	b.WriteString(" question_class=" + questionClass(result))
-	b.WriteString(" confidence=" + confidence)
+	b.WriteString(" confidence_band=" + meta.ConfidenceBand)
+	b.WriteString(" top_confidence=" + meta.TopConfidence)
 	b.WriteString(" primary=" + nonEmpty(result.Plan.PrimaryTool, "unknown"))
 	if lane := dominantLane(result.Hits); lane != "" {
 		b.WriteString(" lane=" + lane)
 	}
 	b.WriteString("\n")
+	b.WriteString("quality_flags=" + strings.Join(meta.QualityFlags, ",") + "\n")
 	writeContractSection(&b, "primary_evidence", primary, 2)
 	writeContractSection(&b, "supporting_evidence", supporting, 1)
+	if summary := traceSummary(result.TraceHits); summary != "" {
+		b.WriteString("trace_summary:\n")
+		b.WriteString(summary)
+		b.WriteString("\n")
+	}
 	writeContractSection(&b, "trace_evidence", result.TraceHits, 1)
 	gaps := resultGaps(result)
 	b.WriteString("gaps:\n")
@@ -223,7 +248,7 @@ func mainAgentAnswer(result explorer.Result) string {
 			b.WriteString("- " + gap + "\n")
 		}
 	}
-	b.WriteString("recommended_action=" + recommendedAction(result))
+	b.WriteString("recommended_action=" + meta.RecommendedAction)
 	b.WriteString("\n")
 	b.WriteString(citationBlock(limitCitations(result.Hits, 4)))
 	return strings.TrimSpace(b.String())
@@ -262,6 +287,34 @@ func retrievalStatus(hits []tools.Hit) string {
 
 func RetrievalStatus(hits []tools.Hit) string {
 	return retrievalStatus(hits)
+}
+
+func PlannerStatus(result explorer.Result) string {
+	return plannerStatus(result)
+}
+
+func RecommendedAction(result explorer.Result) string {
+	return recommendedAction(result)
+}
+
+func Answerability(result explorer.Result) string {
+	return answerability(result)
+}
+
+func ConfidenceBand(result explorer.Result) string {
+	return confidenceBand(result)
+}
+
+func TopConfidence(result explorer.Result) string {
+	return topConfidence(result.Hits)
+}
+
+func QualityFlags(result explorer.Result) []string {
+	return qualityFlags(result)
+}
+
+func TraceSummary(result explorer.Result) string {
+	return inlineTraceSummary(result.TraceHits)
 }
 
 func compactTerms(terms []string) []string {
@@ -313,8 +366,101 @@ func topConfidence(hits []tools.Hit) string {
 	return nonEmpty(hits[0].Confidence, "none")
 }
 
+type contractSummary struct {
+	Status            string
+	PlannerStatus     string
+	Answerability     string
+	ConfidenceBand    string
+	TopConfidence     string
+	RecommendedAction string
+	QualityFlags      []string
+}
+
+func contractMeta(result explorer.Result) contractSummary {
+	return contractSummary{
+		Status:            retrievalStatus(result.Hits),
+		PlannerStatus:     plannerStatus(result),
+		Answerability:     answerability(result),
+		ConfidenceBand:    confidenceBand(result),
+		TopConfidence:     topConfidence(result.Hits),
+		RecommendedAction: recommendedAction(result),
+		QualityFlags:      qualityFlags(result),
+	}
+}
+
+func plannerStatus(result explorer.Result) string {
+	switch {
+	case result.Plan.Ambiguous:
+		return "ambiguous"
+	case result.Plan.NeedCallGraph:
+		return "trace_required"
+	case len(result.Plan.Slots) > 1:
+		return "multi_slot"
+	default:
+		return "targeted"
+	}
+}
+
+func answerability(result explorer.Result) string {
+	switch {
+	case len(result.Hits) == 0:
+		return "unanswerable"
+	case retrievalStatus(result.Hits) == "weak_evidence":
+		return "partial"
+	case needsSupportingEvidence(result) && len(result.SupportingHits) == 0:
+		return "partial"
+	case result.Plan.NeedCallGraph && len(result.TraceHits) == 0:
+		return "partial"
+	case len(result.Warnings) != 0:
+		return "partial"
+	default:
+		return "answerable"
+	}
+}
+
+func confidenceBand(result explorer.Result) string {
+	switch answerability(result) {
+	case "unanswerable":
+		return "none"
+	case "partial":
+		if topConfidence(result.Hits) == "high" {
+			return "medium"
+		}
+		return topConfidence(result.Hits)
+	default:
+		return topConfidence(result.Hits)
+	}
+}
+
+func qualityFlags(result explorer.Result) []string {
+	flags := []string{}
+	if len(result.Hits) == 0 {
+		flags = append(flags, "no_hits")
+	}
+	if retrievalStatus(result.Hits) == "weak_evidence" {
+		flags = append(flags, "weak_top_confidence")
+	}
+	if result.Plan.Ambiguous {
+		flags = append(flags, "ambiguous_plan")
+	}
+	if needsSupportingEvidence(result) && len(result.SupportingHits) == 0 {
+		flags = append(flags, "supporting_gap")
+	}
+	if result.Plan.NeedCallGraph && len(result.TraceHits) == 0 {
+		flags = append(flags, "trace_gap")
+	}
+	if len(result.Warnings) != 0 {
+		flags = append(flags, "warnings_present")
+	}
+	if len(flags) == 0 {
+		return []string{"none"}
+	}
+	return flags
+}
+
 func writeContractSection(b *strings.Builder, label string, hits []tools.Hit, maxItems int) {
 	b.WriteString(label + ":\n")
+	hits = uniqueDisplayHits(hits)
 	if len(hits) == 0 {
 		b.WriteString("- none\n")
 		return
@@ -361,20 +507,113 @@ func resultGaps(result explorer.Result) []string {
 }
 
 func recommendedAction(result explorer.Result) string {
-	status := retrievalStatus(result.Hits)
 	switch {
-	case status == "abstain":
+	case len(result.Hits) == 0:
+		return "clarify_or_retrieve"
+	case result.Plan.Ambiguous:
+		return "clarify"
+	case retrievalStatus(result.Hits) == "weak_evidence":
 		return "re-retrieve"
-	case status == "weak_evidence":
+	case result.Plan.NeedCallGraph && len(result.TraceHits) == 0:
+		return "trace"
+	case needsSupportingEvidence(result) && len(result.SupportingHits) == 0:
 		return "re-retrieve"
-	case len(result.Plan.Slots) > 1 && len(result.SupportingHits) == 0 && result.Plan.Intent == "mixed":
-		return "re-retrieve"
+	case len(result.Warnings) != 0:
+		return "verify"
 	default:
 		return "reason"
 	}
 }
 
+func traceSummary(hits []tools.Hit) string {
+	parts := make([]string, 0, 2)
+	if callers := collectTraceSymbols(hits, "caller"); len(callers) != 0 {
+		parts = append(parts, "- callers: "+strings.Join(callers, " <- "))
+	}
+	if callees := collectTraceSymbols(hits, "callee"); len(callees) != 0 {
+		parts = append(parts, "- callees: "+strings.Join(callees, " -> "))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func inlineTraceSummary(hits []tools.Hit) string {
+	summary := traceSummary(hits)
+	summary = strings.ReplaceAll(summary, "\n", " | ")
+	summary = strings.ReplaceAll(summary, "- ", "")
+	return strings.TrimSpace(summary)
+}
+
+func collectTraceSymbols(hits []tools.Hit, wantRole string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, 3)
+	for _, hit := range uniqueDisplayHits(hits) {
+		if hit.EvidenceType != "trace" {
+			continue
+		}
+		if wantRole != "" && strings.TrimSpace(hit.SupportRole) != wantRole {
+			continue
+		}
+		symbol := shortSymbol(nonEmpty(hit.Symbol, hit.File))
+		if symbol == "" || seen[symbol] {
+			continue
+		}
+		seen[symbol] = true
+		out = append(out, symbol)
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
+}
+
+func uniqueDisplayHits(hits []tools.Hit) []tools.Hit {
+	seen := map[string]bool{}
+	out := make([]tools.Hit, 0, len(hits))
+	for _, hit := range hits {
+		key := displayHitKey(hit)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, hit)
+	}
+	return out
+}
+
+func needsSupportingEvidence(result explorer.Result) bool {
+	return result.Plan.Intent == "mixed" || len(result.Plan.Slots) > 1
+}
+
+func fallbackSupportingHits(allHits []tools.Hit, primary []tools.Hit, maxItems int) []tools.Hit {
+	if maxItems <= 0 {
+		return nil
+	}
+	primaryKeys := map[string]bool{}
+	for _, hit := range uniqueDisplayHits(primary) {
+		primaryKeys[displayHitKey(hit)] = true
+	}
+	out := make([]tools.Hit, 0, maxItems)
+	for _, hit := range uniqueDisplayHits(allHits) {
+		if primaryKeys[displayHitKey(hit)] {
+			continue
+		}
+		if hit.EvidenceType == "trace" || hit.SupportRole == "caller" || hit.SupportRole == "callee" {
+			continue
+		}
+		out = append(out, hit)
+		if len(out) >= maxItems {
+			break
+		}
+	}
+	return out
+}
+
+func displayHitKey(hit tools.Hit) string {
+	return fmt.Sprintf("%s:%d:%d:%s:%s", hit.File, hit.LineStart, hit.LineEnd, hit.Symbol, hit.Why)
+}
+
 func limitCitations(hits []tools.Hit, maxItems int) []tools.Hit {
+	hits = uniqueDisplayHits(hits)
 	if len(hits) <= maxItems {
 		return hits
 	}
@@ -382,6 +621,7 @@ func limitCitations(hits []tools.Hit, maxItems int) []tools.Hit {
 }
 
 func writeEvidenceSection(b *strings.Builder, hits []tools.Hit, label string, maxItems int) {
+	hits = uniqueDisplayHits(hits)
 	if len(hits) == 0 || maxItems <= 0 {
 		return
 	}
@@ -406,7 +646,7 @@ func writeEvidenceSection(b *strings.Builder, hits []tools.Hit, label string, ma
 }
 
 func writeCompactEvidence(b *strings.Builder, idx int, hits []tools.Hit, maxItems int) int {
-	for i, hit := range hits {
+	for i, hit := range uniqueDisplayHits(hits) {
 		if i >= maxItems {
 			break
 		}

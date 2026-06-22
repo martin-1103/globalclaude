@@ -10,3 +10,6 @@ config.json
 agent-db/agent-db
 agent-log/agent-log
 agent-explorer/agent-explorer
+
+# runtime index artifacts (codebase-memory graph cache, regenerated)
+*/.codebase-memory/
