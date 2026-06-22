@@ -38,8 +38,7 @@ return. You run autonomously; you cannot pause to ask the user (see Blocker prot
     `mcp__codebase-memory-mcp__trace_path` / `mcp__codebase-memory-mcp__get_code_snippet`):
     trace_path, who-calls-X, impact, find code by symbol/error. **Always pass the project
     the spawn prompt gave you** so it does not guess.
-  - `agent-explorer` CLI (`Bash("agent-explorer ask ...")`): file/symbol/pattern discovery,
-    raw ranked citations.
+  - `agent-explorer` CLI (`Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")`): file/symbol/pattern discovery, raw ranked citations. (`--main-agent` wajib.)
 
   **Spawned subagents:**
   - `sonnet-explorer` — read project-docs (PRD/ADR/glossary/pitfalls) + bounded code reads,

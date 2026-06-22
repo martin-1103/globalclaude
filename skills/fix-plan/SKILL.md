@@ -34,7 +34,7 @@ execute it safely in parallel without re-deciding anything.
     correlation, row count, aggregate): `Bash("agent-db '<question>'")`. Handles schema
     discovery + multi-step internally — one call regardless of complexity.
   - **agent-log CLI** — re-confirm a runtime fact from logs: `Bash("agent-log '<question>'")`.
-  - **agent-explorer CLI** — code/symbol/pattern discovery: `Bash("agent-explorer ask --repo <repo> --query '<q>' --agent-mode")` — returns raw ranked `file:line` citations for YOU to read and reason over.
+  - **agent-explorer CLI** — code/symbol/pattern discovery: `Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")` — returns raw ranked `file:line` citations for YOU to read and reason over. (`--main-agent` wajib — tanpanya output verbose, parsing gagal.)
 
   **Subagents (spawn):**
   - `sonnet-explorer` — read project-docs (PRD/spec, ADRs, glossary, pitfalls) + a few bounded code reads, return excerpts+citations.

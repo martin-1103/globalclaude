@@ -33,7 +33,7 @@ execute it safely in parallel without re-deciding anything.
   - **agent-db CLI** → `Bash("agent-db '<question>'")` — schema shape, row counts, cross-table queries, multi-step DB investigation (schema discovery, iterative filtering, cross-table correlation).
   - **agent-log CLI** → `Bash("agent-log '<question>'")` — runtime log queries, confirm runtime facts from VictoriaLogs/docker container logs.
   - **codebase-memory MCP** → `mcp__codebase-memory-mcp__search_graph` / `trace_path` / `get_code_snippet` / `query_graph` — trace_path, who-calls-X, impact, find code by symbol. **Always pass project `www-wwwroot-gass-be`.** Call DIRECTLY from main agent, NOT a subagent.
-  - **agent-explorer CLI** → `Bash("agent-explorer ask --repo <repo> --query '<q>' --agent-mode")` — code/symbol/pattern discovery; returns raw ranked `file:line` citations for YOU to read and reason over.
+  - **agent-explorer CLI** → `Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")` — code/symbol/pattern discovery; returns raw ranked `file:line` citations for YOU to read and reason over. (`--main-agent` wajib — tanpanya output verbose, parsing gagal.)
 
   **Subagents (spawn):**
   - `sonnet-explorer` — read project-docs (PRD/spec, ADRs, glossary, pitfalls) + a few bounded code reads, return excerpts+citations; also read the spec/PRD file if one was passed.

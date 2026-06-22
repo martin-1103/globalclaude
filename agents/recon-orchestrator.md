@@ -28,7 +28,7 @@ context. Spawn prompt gives the exact question. Answer it fully, then return.
   - `Bash("agent-log '<question>'")` — logs/traces
   - `mcp__codebase-memory-mcp__search_graph` / `trace_path` / `get_code_snippet` — call edges,
     who-calls, impact (pass `project` slug; see memory for indexed projects)
-  - `Bash("agent-explorer ask ...")` — file/symbol/pattern, raw citations
+  - `Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")` — file/symbol/pattern, raw citations
 - **Spawned subagents (Agent tool):**
   - `haiku-bash` — verbose shell output, multi-step shell gather
   - `haiku-research` — web/doc search
