@@ -84,7 +84,7 @@ Reasoning selalu di main agent, bukan subagent.
 
 Detail per tool:
 - **grep/rg** — string/nama persis, 1 dir. Termurah, tanpa spawn.
-- **`agent-explorer` CLI** — semantic/multi-hop/presisi: di mana X, gimana Y jalan, apa yang manggil Z, trace flow. Hybrid retrieval (rg + ast-grep + codebase-memory + claude-context) + fusion rerank + adaptive memory per-repo. Panggil `Bash("agent-explorer ask --repo <repo> --query '<q>' --agent-mode")` → balik retrieval pack `file:line` ter-skor + status grounded/weak/abstain. ZERO LLM summary di tengah (beda dari subagent) → ga mislead. Main agent HARUS Read file:line hasilnya sebelum reason.
+- **`agent-explorer` CLI** — semantic/multi-hop/presisi: di mana X, gimana Y jalan, apa yang manggil Z, trace flow. Hybrid retrieval (rg + ast-grep + codebase-memory + claude-context) + fusion rerank + adaptive memory per-repo. Panggil `Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")` → balik `retrieval_contract` dengan `file:line` ter-skor + `status` grounded/weak/abstain + `recommended_action` + `gaps`. (`--agent-mode` = format berbeda, tanpa `recommended_action` — jangan pakai untuk main agent). ZERO LLM summary di tengah (beda dari subagent) → ga mislead. Main agent HARUS Read file:line hasilnya sebelum reason.
   - Lambat (~25s/query, ada LLM rerank). Buat discovery presisi yang worth nunggu, BUKAN lookup remeh — itu cukup grep/rg.
   - SATU pertanyaan per call; scope lokasi lebar di query. Multi-part → pecah jadi beberapa call.
 - **codebase-memory MCP** (`mcp__codebase-memory-mcp__search_graph`/`trace_path`/`get_code_snippet`/`query_graph`) — who-calls, impact, call chain, symbol def. Panggil LANGSUNG dari main agent (hook ga block lagi). Exact + cepat. Project harus indexed dulu.

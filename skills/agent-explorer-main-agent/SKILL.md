@@ -25,33 +25,39 @@ Use `agent-explorer` as retrieval engine, not final thinker. Goal: return short,
 
 ## Default Command
 
-Use strict contract first:
-
 ```bash
-agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --timeout 60
+agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --timeout 90
 ```
+
+`$REPO` HARUS absolute path (mis. `/www/wwwroot/gass/be`), BUKAN slug — slug bikin `chdir: no such file or directory`.
+
+`--main-agent` WAJIB — tanpanya output verbose (human-readable default), field `gaps` dan
+`recommended_action` tidak ada, contract parsing tidak reliable.
+
+Jangan pakai `--agent-mode` — itu format berbeda (`retrieval_pack`, tanpa `gaps`/`recommended_action`).
 
 If binary not in `PATH`, use absolute path:
 
 ```bash
-/var/pile/agent-explorer/agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --timeout 60
+/var/pile/agent-explorer/agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --timeout 90
 ```
 
-## Output Contract
+## Output Contract (`--main-agent` format)
 
-Expect:
+Header: `retrieval_contract`
 
-- `retrieval_contract`
+Fields (satu baris per field):
 - `status=grounded|weak_evidence|abstain`
 - `intent=...`
 - `question_class=literal|lookup|behavior|multi-hop|trace`
 - `confidence=high|medium|low|none`
-- `primary_evidence`
-- `supporting_evidence`
-- `trace_evidence`
-- `gaps`
-- `recommended_action=reason|re-retrieve`
-- `<final_answer>` citations
+- `primary_evidence`, `supporting_evidence`, `trace_evidence` (sections hits)
+- `gaps=...` — apa yang tidak ditemukan
+- `recommended_action=reason|re-retrieve` — sinyal eksplisit dari retrieval engine
+
+Diakhiri `<final_answer>` block dengan citations `file:line [symbol]`.
+
+Jangan parse `retrieval_pack` header — itu output `--agent-mode` (flag berbeda, field berbeda).
 
 ## Operating Rules
 
@@ -63,14 +69,15 @@ Expect:
    - If `status=weak_evidence` or `recommended_action=re-retrieve`, do not overclaim.
 
 3. Keep context small.
-   Prefer `--main-agent`.
-   Use `--json` only if caller truly needs structured parsing.
+   Prefer `--citation-only` untuk output ringkas.
+   Use `--json` kalau butuh parsing terstruktur.
 
-4. Escalate only when needed.
-   If first retrieval weak:
-   - narrow query
-   - ask second retrieval with sharper wording
-   - use `trace` command for caller/callee specific questions
+4. Escalate only when needed — protokol wajib, jangan skip.
+   If first retrieval `weak_evidence` or `abstain`:
+   - WAJIB retry sekali dengan query yang lebih sharp/spesifik (symbol name eksak, bukan konsep)
+   - Kalau retry kedua masih weak → BARU fallback ke tool lain
+   - Fallback order: codebase-memory MCP `trace_path`/`search_graph` (caller/callee, exact symbol) → rg/grep (literal string)
+   - JANGAN langsung abandon ke MCP setelah hit pertama weak — retry dulu.
 
 5. Preserve evidence boundaries.
    Retrieval engine finds code evidence.
@@ -99,22 +106,19 @@ Examples:
 
 ## Fallback Commands
 
-Caller/callee trace:
-
+Caller/callee (sharper query):
 ```bash
-agent-explorer trace --repo "$REPO" --query "$QUERY" --direction both
+agent-explorer ask --repo "$REPO" --query "which funcs call X" --main-agent --timeout 90
 ```
 
-Machine-readable:
-
+Machine-readable (structured parsing):
 ```bash
-agent-explorer ask --repo "$REPO" --query "$QUERY" --json --timeout 60
+agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --json --timeout 90
 ```
 
-Compact but less strict:
-
+Citation-only (ringkas):
 ```bash
-agent-explorer ask --repo "$REPO" --query "$QUERY" --agent-mode --timeout 60
+agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --citation-only --timeout 90
 ```
 
 ## Common Mistakes
@@ -124,9 +128,12 @@ agent-explorer ask --repo "$REPO" --query "$QUERY" --agent-mode --timeout 60
 - Do not ask retrieval engine to write long prose explanation first.
 - Do not pass giant vague question if one sharper query would work.
 - Do not ignore `gaps` or `recommended_action`.
+- Do not pass slug as `--repo` — must be absolute path.
 
 ## Quick Reference
 
-- Best default: `agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --timeout 60`
-- Trace question: `agent-explorer trace --repo "$REPO" --query "$QUERY" --direction both`
-- Weak result: rewrite query, rerun once, then reason only if grounded
+- Best default: `agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --timeout 90`
+- Compact output: add `--citation-only`
+- Structured output: add `--json`
+- Caller/callee: sharper query via `ask` OR codebase-memory MCP `trace_path`
+- Weak result: rewrite query, rerun once, then reason only if `recommended_action=reason`
