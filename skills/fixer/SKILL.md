@@ -1,7 +1,7 @@
 ---
 name: fixer
-description: Execute an approved fix plan — run its work items wave by wave, parallel where safe, verify each, review the diff, and ship. Use when user says "execute the plan", "jalankan plan", "kerjakan fix", "/fixer", "apply the fix", "implement the plan", or hands over a plan file from /fix-plan or /impl-plan. This DOES edit code — only run on an approved plan. The executor-ready handoff is a durable file `project-docs/plans/<slug>.tasks.json`.
-when_to_use: an executor-ready handoff file `project-docs/plans/<slug>.tasks.json` exists (work items with wave, blockedBy, files, verify, rollback, status) alongside the plan markdown, and the user has approved applying the fix
+description: Execute an approved fix plan — drive the worker lane through the `agent-plan-worker` CLI and the strong-editor lane through editor subagents, wave by wave, verify each, review the diff, and ship. Use when user says "execute the plan", "jalankan plan", "kerjakan fix", "/fixer", "apply the fix", "implement the plan", or hands over a plan file from /fix-plan or /impl-plan. This DOES edit code — only run on an approved plan. The executor-ready handoff is lane-specific worker artifact `project-docs/plans/<slug>.worker.request.json`.
+when_to_use: an executor-ready handoff file `project-docs/plans/<slug>.worker.request.json` exists alongside plan markdown, worker tasks, and optional strong-editor manifest, and user has approved applying worker-lane fix items
 ---
 
 # Fixer — plan executor
@@ -15,7 +15,7 @@ This skill edits production code. Only run it on a plan the user approved.
 
 ## Anti-skip guarantee
 
-Per-item `status` lives on disk in `project-docs/plans/<slug>.tasks.json`, not in the agent's
+Per-item `status` lives on disk in `project-docs/plans/<slug>.worker.tasks.json`, not in the agent's
 memory or any in-memory task list. The execution loop and the final completeness gate both
 read that file, never your recollection of what you did. An item is written `completed` ONLY
 after its `verify` passes RED→GREEN; the main agent serializes that write (editors never
@@ -29,18 +29,33 @@ file is also the resume point: a restart re-reads it and continues from the firs
 - **The plan is the contract.** Execute what it says — its work items, files, waves,
   verify commands, rollback. Don't add scope, don't "improve" adjacent code, don't change
   the approach. Scope drift is the #1 way execution breaks things the plan didn't intend.
-- **You orchestrate; editors edit.** The main agent does NOT edit code directly (it's a
-  1-liner exception only). Spawn editor subagents per work item. Pick by the item's `risk`:
-  - **mechanical** (rename, format, string swap, no logic) → main agent may do it inline
-    if truly trivial, else `sonnet-editor`.
-  - **low/med risk, logic, 1-3 files** → `sonnet-editor` (default).
-  - **high risk / 4+ files / algorithm / concurrency / schema-contract** → `opus-coder`.
-  - Editors get raw context they need from haiku first (see below); they don't go hunting.
-- **Fetch raw context, editors edit, you orchestrate.** Before an edit, codebase-memory MCP
-  (`mcp__codebase-memory-mcp__trace_path`/`get_code_snippet`) or the `agent-explorer` CLI
-  (`Bash("agent-explorer ask ...")`) can fetch the surrounding code/callers so the editor starts informed.
-  After an edit, `haiku-bash` runs the verify command and returns output verbatim. The
-  editor writes; haiku never writes code.
+- **Three lanes, three executors — do NOT confuse them.** `/fix-plan` splits work into lanes;
+  each lane has its OWN executor and you must route by lane:
+  - **Worker lane** (`<slug>.worker.tasks.json`, items `execution_lane: "agent-plan-worker"`)
+    → **DEPRECATED as of 2026-06-22.** agent-plan-worker is no longer the default executor
+    lane. reasonix (reasonix lane) is the default executor for editable tasks, having proven
+    superset capability — it handled large-file deep-anchor edits (e.g. transformer.go 44KB,
+    anchor at line 766) that the worker blocked on. The worker CLI path is retained only for
+    legacy plans that still emit `worker.tasks.json` items, or when a hard file-boundary /
+    deepseek-pinned model is explicitly required. New plans should route editable tasks to the
+    reasonix lane. If a legacy worker-lane item exists, the CLI still runs it (see Phase 1).
+  - **Strong-editor lane** (`<slug>.strong-editor.manifest.json`, items
+    `execution_lane: "strong-editor"`) → these are refactors / new-file authoring the worker
+    CLI can't do. ONLY these go to editor subagents (`opus-coder` for high-risk/4+ files/
+    algorithm/concurrency/schema-contract, else `sonnet-editor`).
+  - **Reasonix lane** (`<slug>.strong-editor.manifest.json`, items
+    `execution_lane: "reasonix"`) → **DEFAULT executor lane for editable tasks.** These items
+    are executed by spawning a `reasonix-runner` subagent (which drives the reasonix coding
+    agent via `reasonix-wrap`), NOT `sonnet-editor`/`opus-coder`. Same manifest file as
+    strong-editor, different routing target. See Phase 1b for full routing and safety rules.
+  - The main agent NEVER edits code directly (1-liner exception only). It runs the CLI for
+    legacy worker-lane items and orchestrates editors/runners for the strong-editor and
+    reasonix lanes.
+- **Fetch raw context for the strong-editor lane.** Before a strong-editor edit, codebase-memory
+  MCP (`mcp__codebase-memory-mcp__trace_path`/`get_code_snippet`) or the `agent-explorer` CLI
+  (`Bash("agent-explorer ask ...")`) can fetch surrounding code/callers so the editor starts
+  informed. After any change (either lane), `haiku-bash` runs the verify command and returns
+  output verbatim. The CLI / editor writes; haiku never writes code.
 - **Verify is not optional.** Every work item has a `verify` command that is RED before and
   must be GREEN after. An item is not done until its verify passes. A green build that
   doesn't exercise the change is not a pass — say so.
@@ -51,9 +66,16 @@ file is also the resume point: a restart re-reads it and continues from the firs
 
 ## Phase 0 — Load the plan
 
-**The handoff file is your source of truth — not the markdown.** `/fix-plan` and `/impl-plan`
-write one durable file alongside the plan markdown: `project-docs/plans/<slug>.tasks.json`
-(same `<slug>` as the plan markdown). It is a JSON array of work items, each:
+**The worker handoff file is your source of truth — not the markdown.** `/fix-plan` and `/impl-plan`
+write lane-aware artifacts alongside the plan markdown:
+
+- `project-docs/plans/<slug>.tasks.json` -> master graph across lanes
+- `project-docs/plans/<slug>.worker.tasks.json` -> worker lane only
+- `project-docs/plans/<slug>.worker.request.json` -> runtime request for worker lane
+- `project-docs/plans/<slug>.strong-editor.manifest.json` -> non-worker lane
+
+You execute from `project-docs/plans/<slug>.worker.request.json`, which points to
+`project-docs/plans/<slug>.worker.tasks.json`. Worker artifacts contain JSON array of work items, each:
 
 ```json
 {"id":"T1","wave":1,"blockedBy":[],"files":["path/a.go"],"track":"forward",
@@ -67,89 +89,162 @@ Schema contract (the file MUST conform; if it doesn't, STOP and send back to the
 - `blockedBy` and `files` are arrays (may be empty for `blockedBy`, never empty for `files`).
 - The top-level value is a **non-empty** JSON array; an empty array means no handoff (STOP).
 
-Read the file (in the main agent — it's small structured state, not a gather) and parse the
-JSON array. This array is authoritative; **do NOT parse the plan markdown table** for the
-work items. If the markdown and the JSON ever disagree on a work item, **the JSON wins**;
+Read `project-docs/plans/<slug>.worker.request.json` first, extract `tasks_path`, then read
+that worker tasks file (in main agent — small structured state, not gather) and parse the
+JSON array. This array is authoritative for worker lane; **do NOT parse the plan markdown table**
+for the work items. If the markdown and JSON disagree on worker item, **the JSON wins**;
 the markdown table is a human-readable index only.
 
 - Read the plan markdown ONCE for the human-level context the file doesn't carry: deploy
   order, the end-to-end Verification section, and the Rollback section. Don't re-derive the
   work items from it.
-- If `project-docs/plans/<slug>.tasks.json` is **missing or an empty array**, the handoff is
-  incomplete — STOP and send it back to `/fix-plan` or `/impl-plan` to write it. Don't try
-  to reconstruct the items by parsing markdown.
+- If `project-docs/plans/<slug>.worker.request.json` or `project-docs/plans/<slug>.worker.tasks.json`
+  is missing, invalid, or empty, handoff incomplete — STOP and send back to `/fix-plan` or
+  `/impl-plan`. Don't reconstruct by parsing markdown.
+- If worker request points to mixed-lane master `*.tasks.json` instead of worker-only tasks,
+  STOP. That is planner contract bug, not executor job to guess around.
 - Sanity-check each item is executable: it has `files` + a `verify` command. If an item is
   vague ("fix the service") or missing `verify`, STOP — back to `/fix-plan` or `/impl-plan`.
 - Respect **deploy order** from the markdown: if a writer change must land before a reader
   change, confirm the `wave` numbers encode that. If they don't, stop and flag it.
 
-This file is also how a run **resumes** after a Claude Code restart: re-read it on start, any
+This worker tasks file is also how a run **resumes** after a Claude Code restart: re-read it on start, any
 item already `status:"completed"` is skipped, claim items with `status:"pending"` whose
 `blockedBy` are all `completed`, complete them, the rest unblock automatically — no re-parse.
 
-## Phase 1 — Execute wave by wave (file-driven loop)
+## Phase 1 — Execute the worker lane via the `agent-plan-worker` CLI
 
-The loop is **file-driven, not memory-driven**. The loop condition is "any item in
-`project-docs/plans/<slug>.tasks.json` still has `status:"pending"`" — read that from the
-file each iteration, never from your recollection of what you've done. **Barrier between
-waves**: every item in wave K must be applied AND verified AND reviewed before any wave K+1
-item starts.
+> **DEPRECATED lane** — runs only if a plan still has `worker.tasks.json` items. Prefer the reasonix lane (Phase 1b). See Operating Rules.
 
-Each iteration:
+The worker lane runs through the **`agent-plan-worker` CLI** — the executor `/fix-plan`
+handed off to. You do NOT spawn editor subagents for worker-lane items. The CLI applies the
+items in dependency order, with its own apply/rollback machinery, and writes `status` back
+to `<slug>.worker.tasks.json`. Your job is to drive the CLI, then verify + review its output.
 
-1. **Read the file and compute claimable items.** Re-read `<slug>.tasks.json`. Claimable =
-   items where `status=="pending"` AND every id in `blockedBy` is `status=="completed"`.
-   - If claimable is **empty but pending items remain** → DEADLOCK (a bad `blockedBy`, or a
-     dep that never went green) → STOP LOUD, list the stuck item ids; do not spin.
-2. **File-disjoint check within the batch.** List the `files` of every claimable item. If two
-   claimable items share a file they are NOT parallel-safe → **serialize them**: run one this
-   iteration, defer the other to the next. (Do NOT use git worktrees — this project's
-   CLAUDE.md forbids them. Serialize the overlap instead.)
-3. **Spawn editors in ONE batch** for the parallel-safe items. Each editor gets: the item's
-   `change`, its `files` (as the hard allowed-files boundary), the `verify` command, and any
-   fetched context. Choose `sonnet-editor` or `opus-coder` per the item's `risk`. **Editors
-   NEVER write `<slug>.tasks.json`** — they return their result; the main agent owns the file.
-4. **Verify each item** as its editor returns: run the item's `verify` via `haiku-bash`,
-   confirm RED→GREEN. If it fails, hand the failure back to the same editor to fix (or
-   escalate sonnet→opus); don't move on with a red item. A green build that doesn't exercise
-   the change is NOT a pass.
-   - **Editor returned `BLOCKED_NEEDS_SCOPE`** (needs to cross its `files` boundary or change
-     a shared signature/contract): this is NOT a verify failure — do NOT re-spawn the same
-     editor (it will block again). The item stays `pending`. This is a **plan gap**: STOP the
-     wave, carry the editor's proposal (change + affected callers/files) back to `/fix-plan`
-     or `/impl-plan` to re-scope the task. Don't redesign or widen the boundary here.
-     - **If you (or the planner) authorize the proposal and re-dispatch**: the new spawn is a
-       **fresh agent with ZERO memory** — the blocked editor's context was discarded the
-       moment it returned, and a returned agent cannot be continued. Write the dispatch
-       prompt **self-contained**: the exact files, the authorized change/idiom (restate it —
-       copy from the editor's return), and the rationale. Never write "as you proposed" /
-       "continue your work" — the receiver never proposed anything, and a prompt leaning on
-       memory that doesn't exist makes the editor invent the fix.
-5. **Write status back (race-safe).** ONLY after an item's verify passes, the MAIN agent
-   marks it `completed` in the file. The main agent is a **single** agent processing editor
-   returns one after another — it is the ONLY writer of this file, so writes are already
-   serial; no lock is needed. For each completed item, Read-modify-Write the whole file: read
-   the current JSON, set that one item's `status` to `"completed"`, write the whole array
-   back. Never let an editor subagent write this file — that is what would introduce a race.
-6. **Review the diffs**: spawn `diff-reviewer` on the wave's changes against the item specs.
-   - `Verdict: SHIP` → wave done, proceed.
-   - `Verdict: BLOCK` → fix the blockers (back to the editor), re-verify, re-review BEFORE
-     marking the item `completed`. A `BLOCK`ed item stays `pending` on disk until cleared.
-   - High-risk items: review is mandatory. Low mechanical items with a clean self-check
-     may skip the reviewer.
-7. Barrier: only when the whole wave is green + reviewed, advance to the next wave. Loop back
-   to step 1 while any item remains `pending` in the file.
+**Step A — validate the handoff before running.** This catches planner schema bugs (e.g.
+`verify` written as a string when the CLI wants `[]string`) before they waste a run:
+```
+agent-plan-worker -doctor-handoff -request <abs path to <slug>.worker.request.json> -format text
+```
+- `Status: valid` → proceed.
+- `Status: invalid` with Issues → it's a **planner contract bug**. STOP, report the exact
+  issue, send back to `/fix-plan` to fix the artifact. Do NOT hand-edit the artifact and
+  guess around it (warnings like "acceptance derived from change+verify" are fine — only
+  `Issues` block).
+
+**Step B — set apply mode.** The request from the planner ships with `"apply_writes": false`
+(dry-run safe default). The user must have approved applying (this skill only runs on an
+approved plan). Read `<slug>.worker.request.json`, set `"apply_writes": true` (Edit the file),
+and confirm `load_provider_config`, `tasks_path`, `repo_root`, `profile_path` are present.
+
+**Step C — run the worker.** Execute via `haiku-bash` (output is verbose) or directly if you
+need the full result:
+```
+agent-plan-worker -request <abs path to <slug>.worker.request.json> -output-detail compact -format text
+```
+The CLI processes items wave by wave (it honors `wave` + `blockedBy`), applies the edits,
+runs each item's `verify`, and writes `status:"completed"` back to the tasks file per item
+that passes. It is the **single writer** of that file during the run — you do not write
+`status` yourself for worker items.
+
+**Step D — handle the CLI result.**
+- **Clean run** (all worker items applied + verified) → proceed to Step E.
+- **CLI reports an item failed verify / could not apply / blocked on scope** → this is a
+  worker-lane stall. Re-read `<slug>.worker.tasks.json`: items still `pending` are the
+  unfinished ones. Do NOT fall back to spawning `sonnet-editor` to "finish the job" — that
+  bypasses the lane contract. Two legit moves:
+  - transient/environment failure (build dep, container down) → fix the environment, re-run
+    the CLI (it resumes from `pending` items).
+  - genuine item defect (the `change` can't be applied as written, scope too narrow) →
+    **plan gap**: STOP, report it, send back to `/fix-plan` to re-scope. Don't redesign here.
+
+**Step E — independent verify (don't trust the CLI's self-report).** The CLI's "verified" is
+a LEAD, not ground truth. Re-run the plan's per-item `verify` commands yourself via
+`haiku-bash`, confirm RED→GREEN on the actual change. A green build that doesn't exercise the
+change is NOT a pass.
+
+**Step F — review the diff.** Spawn `diff-reviewer` on the worker lane's changes against the
+item specs.
+- `Verdict: SHIP` → worker lane done.
+- `Verdict: BLOCK` → the CLI applied something wrong. Report the blocker; if it's a bad apply,
+  use the item's `rollback` + send back to `/fix-plan`. Don't silently patch over it.
+- High-risk items: review mandatory. Low mechanical items with a clean self-check may skip.
+
+## Phase 1b — Execute the strong-editor lane (if any)
+
+Only items in `<slug>.strong-editor.manifest.json` go here — refactors / new-file authoring
+the worker CLI can't do. The MAIN agent owns ordering: if a strong-editor item must land
+before/after a worker item (cross-lane dep, tracked in the master `<slug>.tasks.json`), run
+the lanes in that sequence — the worker file's `blockedBy` only references worker items.
+
+For each strong-editor item (respect its `wave` + `blockedBy` within the manifest):
+1. **File-disjoint check** within a batch. Two items sharing a file are NOT parallel-safe →
+   serialize. (No git worktrees — this project's CLAUDE.md forbids them.)
+2. **Spawn the executor** — route by `execution_lane`:
+   - **`"strong-editor"`** → spawn `opus-coder` (high-risk / 4+ files / algorithm /
+     concurrency / schema-contract) or `sonnet-editor` (everything else). Give it: the
+     item's `change`, its `files` (hard boundary), the `verify` command, and any fetched
+     context. Editor returns a compact summary; MAIN agent records status.
+   - **`"reasonix"`** → spawn a `reasonix-runner` subagent instead of any editor. Pass it:
+     the repo path, the item's `change`, its `files` (the boundary — passed as
+     `reasonix-wrap`'s `--files`), the `verify` command, **and the chosen `model`**
+     (see model-selection below). The runner drives `reasonix-wrap` (forwarding
+     `--model <chosen>`) and returns a compact summary **plus a `STATUS=` line**
+     (`STATUS=done` / `STATUS=failed` / `STATUS=out_of_bounds`). See SAFETY CAVEAT below.
+     - **`verify` is a `[]string` array in the manifest, but `reasonix-wrap --verify` takes a
+       SINGLE string.** Collapse the array before spawning: join with ` && ` into one shell
+       command (e.g. `["go build ./x","go test ./x"]` → `go build ./x && go test ./x`). A
+       one-element array just passes through as its single element.
+
+     **Reasonix model selection** — pick per work item from its `risk` + `task_class`
+     fields (from tasks.json), then pass the chosen model in the runner spawn spec:
+     - `risk:"high"` OR `task_class:"refactor"` → `deepseek-pro` (effort=max) — heavy/critical reasoning
+     - `risk:"med"` OR `task_class:"surgical"` → `deepseek-pro-high` (effort=high) — medium
+     - `risk:"low"` AND `task_class:"mechanical"` → `deepseek-flash` (light/cheap)
+     - default / unsure → `deepseek-pro` (safe: max effort)
+
+     Available providers are config-defined in `~/.config/reasonix/config.toml`
+     (deepseek-pro / deepseek-pro-high / deepseek-flash). To add a model+effort combo,
+     add a `[[providers]]` block there.
+   - **N reasonix items in the same wave** (file-disjoint, step 1 already checked) → spawn
+     all N `reasonix-runner` subagents in ONE message (parallel, same as editor items).
+   - Editors and runners NEVER write the tasks file — they return their result; the MAIN
+     agent records status.
+
+   > **SAFETY CAVEAT — reasonix lane**: reasonix has broad write access (`/var/pile`) and
+   > only a SOFT per-task file boundary. `reasonix-wrap` detects out-of-bounds writes
+   > **post-hoc** via git-diff and signals `STATUS=out_of_bounds`. The fixer MUST treat
+   > `STATUS=out_of_bounds` AND `STATUS=failed` as a **BLOCK** for that item: do NOT
+   > advance the wave, do NOT mark the item `completed`, invoke the item's `rollback`
+   > immediately and surface the issue. The verify gate (step 3) and diff-review gate
+   > (step 5) are the safety net before a wave advances — **they are NOT optional for
+   > reasonix items**.
+
+3. **Verify** via `haiku-bash`, RED→GREEN. Applies to ALL lanes including reasonix.
+   Failure → back to the same editor/runner (or escalate sonnet→opus for strong-editor).
+   `BLOCKED_NEEDS_SCOPE` → plan gap, STOP, back to `/fix-plan` (re-dispatch prompt must
+   be self-contained — the fresh subagent has ZERO memory of the prior one).
+4. **Record status** in the master `<slug>.tasks.json` (Read-modify-Write the whole array,
+   set that item's `status` to `"completed"`). MAIN agent is the only writer. Applies to
+   ALL lanes including reasonix — `reasonix-runner` never touches the tasks file.
+5. **Review** via `diff-reviewer`; SHIP/BLOCK as in Phase 1 Step F. Applies to ALL lanes
+   including reasonix — the verify + diff-review gates are not optional for reasonix items.
+
+Barrier: finish all of one lane's required-first items before the dependent lane starts.
 
 ## Phase 2 — Gap check (final, goal-backward)
 
 **Completeness gate (mechanical, anti-skip) — run this FIRST, before any end-to-end check.**
-Re-read `project-docs/plans/<slug>.tasks.json` from disk and count items where
-`status != "completed"`. If that count is **> 0** → SKIP DETECTED → STOP LOUD, list the
-pending item ids, and do NOT declare done. This is the mechanical guard against the AI
-skipping a work item: a skipped item is never verified, so it is never written `completed`,
-so it stays `pending` in the file, so this count catches it. A skipped item also leaves its
+Re-read BOTH lane files from disk — `project-docs/plans/<slug>.worker.tasks.json` AND (if it
+exists) `project-docs/plans/<slug>.strong-editor.manifest.json` — and count items where
+`status != "completed"` across both. If that count is **> 0** → SKIP DETECTED → STOP LOUD,
+list the pending item ids + which lane, and do NOT declare done. This is the mechanical guard
+against skipping a work item: a skipped item is never verified, so it is never written
+`completed`, so it stays `pending`, so this count catches it. A skipped item also leaves its
 dependents blocked (their `blockedBy` never clears), so this gate catches the skip AND its
-downstream stall in one count. Never report success while any item is `pending`.
+downstream stall in one count. The worker CLI writes worker-lane status; the MAIN agent writes
+strong-editor status — the gate reads disk either way, never your recollection. Never report
+success while any item is `pending` in either lane.
 
 Only after the completeness gate passes (zero pending) do the end-to-end checks below run.
 
@@ -175,11 +270,12 @@ not just per-item tests. Run the plan's end-to-end / regression checks via `haik
 ## Phase 4 — Report
 
 Reply in chat (Bahasa Indonesia, terse):
-- What was applied: state **"N/N work items completed (verified RED→GREEN)"**, citing
-  `project-docs/plans/<slug>.tasks.json` as the source of that count, plus files changed.
+- What was applied, per lane: **"N/N worker items completed via agent-plan-worker CLI
+  (verified RED→GREEN)"** + **"M/M strong-editor items completed"** if that lane ran, citing
+  the lane files as source of count, plus files changed.
 - Both tracks for a data fix (forward + remediation, with the repaired row count).
 - Anything left: open gaps sent back to `/fix-plan` or `/impl-plan`, manual deploy steps.
-- Resume note: a restart resumes from `<slug>.tasks.json` — items already `completed` are
+- Resume note: restart resumes from `<slug>.worker.tasks.json` — items already `completed` are
   skipped, `pending` items continue.
 - Rollback pointer: where the plan's rollback section is, if prod misbehaves.
 

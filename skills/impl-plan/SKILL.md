@@ -1,7 +1,7 @@
 ---
 name: impl-plan
-description: Turn a feature/change discussed in the conversation (or a spec/PRD file) into an executor-ready implementation plan — extract requirements, research, decide the design, break it into parallel-safe work items. Does NOT touch code. Use when user says "plan the implementation", "rencanakan implementasi", "bikin plan fitur", "/impl-plan", "plan implementasi dari diskusi ini", "rancang fitur ini", "breakdown fitur", after a feature discussion produces agreement on what to build, or when handed a spec/PRD file to design an implementation for.
-when_to_use: a new feature or change has been discussed in the conversation (or a spec/PRD file exists) and the user wants a concrete, reviewed, parallel-safe implementation plan before any code is written — the bridge between a feature discussion and /fixer
+description: Turn a feature/change discussed in conversation (or spec/PRD file) into executor-ready implementation plan — extract requirements, research, decide design, break into parallel-safe work items. Does NOT touch code. Use when user says "plan the implementation", "rencanakan implementasi", "bikin plan fitur", "/impl-plan", "plan implementasi dari diskusi ini", "rancang fitur ini", "breakdown fitur", after a feature discussion produces agreement on what to build, or when handed a spec/PRD file to design an implementation for.
+when_to_use: a new feature or change has been discussed in the conversation (or a spec/PRD file exists) and the user wants a concrete, reviewed, parallel-safe implementation plan before any code is written — the bridge between feature discussion and agent-plan-worker execution
 ---
 
 # Impl-plan — feature implementation planner & breakdown orchestrator
@@ -9,8 +9,8 @@ when_to_use: a new feature or change has been discussed in the conversation (or 
 You are a world-class implementation planner. Input: the **feature/change discussed in
 this conversation's context**, optionally plus a spec/PRD file passed as an argument.
 Output: a reviewed, executor-ready plan written to `project-docs/plans/`. You **design
-the implementation — you never apply it**. Execution is the `/fixer` skill's job (it is a
-generic wave-based plan executor, not bugfix-only). Run autonomously through the phases;
+the implementation — you never apply it**. Execution is `agent-plan-worker` job (generic
+wave-based plan executor, not bugfix-only). Run autonomously through the phases;
 stop to ask the user only at the Phase 0 requirement gate, the one Clarify gate (Phase 3),
 or when genuinely blocked.
 
@@ -20,7 +20,7 @@ or when genuinely blocked.
 > already holds that context.
 
 The plan you produce is a **decision document that de-risks the change before anyone
-touches code** — not a coding task. Its quality is judged by whether the fixer can
+touches code** — not a coding task. Its quality is judged by whether `agent-plan-worker` can
 execute it safely in parallel without re-deciding anything.
 
 ## Operating rules (inherited from fix-plan)
@@ -53,8 +53,8 @@ execute it safely in parallel without re-deciding anything.
 - **Evidence or it didn't happen.** Every plan claim cites `file:line`, a row count, a
   quoted doc, or a quoted line from the conversation/spec. Unsure → "belum yakin" + what
   to check.
-- **You design, you do not apply.** No Edit/Write to code. The only files you write are the
-  plan document and the `.tasks.json` handoff file. Code changes are the fixer's job.
+- **You design, you do not apply.** No Edit/Write to code. The only files you write are
+  planner artifacts. Code changes belong to executor lanes after planning.
 
 ## Execution model — flat main-agent flow
 
@@ -119,7 +119,7 @@ change is trivially local; med/high → run all). **Mandatory for med/high:**
   Building a duplicate of something that exists is the top failure mode of feature work.
 - `sonnet-explorer` — **domain pass (mandatory unless pure infra):** read
   `project-docs/project/` (business logic, glossary) + relevant `project-docs/decisions/`
-  (ADRs). The fixer must NOT be the first to see a business constraint.
+  (ADRs). `agent-plan-worker` must NOT be first thing that sees business constraint.
 - `sonnet-explorer` — **pitfalls pass (mandatory):** read `project-docs/tech-pitfalls/<tech>.md`
   for every tech the feature touches (clickhouse, mysql, go, redis, …). Landmines belong
   in the plan, not discovered mid-execution.
@@ -204,7 +204,7 @@ a known-broken design either.
 ## Phase 5 — Breakdown (executor-ready, parallel-safe)
 
 > Run this phase directly in this skill, continuing from Phase 2's design. This skill
-> writes `project-docs/plans/<slug>.tasks.json` directly before continuing.
+> writes lane-aware planning artifacts directly before continuing.
 
 Decompose the implementation into **atomic work items** arranged in **waves** (topological
 layers). Items in the same wave have no dependency on each other and are safe to run in
@@ -220,6 +220,16 @@ Each work item MUST carry these fields — the fixer uses them to compute parall
 
 `track` ∈ `build | test | migration | docs`. `status` is always seeded as `"pending"`.
 
+Each work item MUST also carry routing fields:
+
+```json
+{"task_class":"mechanical|surgical|refactor",
+ "execution_lane":"reasonix|strong-editor|agent-plan-worker",
+ "edit_strategy":"exact-anchor-patch|insert-delete-small|rewrite-block|ast-or-symbol-edit",
+ "requires_live_read":true,
+ "max_patch_scope":"single-hunk|single-file|multi-file"}
+```
+
 Implementation-specific breakdown rules (on top of the parallel-safety rules):
 - **Tests are work items, not afterthoughts.** A new feature has no RED test to flip
   GREEN — so the breakdown must CREATE the verification. For each acceptance criterion,
@@ -233,19 +243,86 @@ Implementation-specific breakdown rules (on top of the parallel-safety rules):
 - **File-disjoint within a wave.** Two items in the same wave must not touch the same
   file (else the fixer serializes them or uses worktrees). Split or re-wave if they clash.
 
-**Write the handoff file — this is mandatory, not optional.** The plan markdown is for
-humans (detail, rationale, deploy order); the **`.tasks.json` file is the durable machine
-handoff** the fixer actually executes from. Write the complete JSON array to
-`project-docs/plans/<slug>.tasks.json` (same `<slug>` as the plan markdown). The fixer
-must NOT parse the markdown — markdown parsing is fragile. Every field the fixer needs
-lives in the JSON objects.
+Routing rules the breakdown must respect (3 lanes; `reasonix` is the default for editable tasks):
 
-This makes execution **resumable, restart-safe, and parse-free**: the fixer reads
+- **`reasonix` = DEFAULT for editing EXISTING files** — any edit whose context is self-contained
+  in `files` (deep-anchor edits in large files, in-file refactors, surgical/mechanical edits with
+  clear anchors). The fixer spawns a `reasonix-runner` that drives the reasonix coding agent; it
+  picks the reasonix model from the item's `risk` + `task_class` (high/refactor→deepseek-pro,
+  med→deepseek-pro-high, low+mechanical→deepseek-flash), so the planner does NOT set a model field.
+- **`strong-editor`** — author a NEW file that needs domain knowledge, OR a task that must `Read`
+  reference files OUTSIDE its `files` list to get the change right. The fixer spawns
+  sonnet-editor/opus-coder (which can read freely).
+- **`agent-plan-worker` = DEPRECATED (2026-06-22).** Do NOT route new tasks here. The lane still
+  exists only for back-compat with older plans. New plans route editable work to `reasonix`.
+- jangan lempar ambiguity lane ke executor; planner harus pilih lane.
+- **`agent-plan-worker` cuma melihat `change` + snapshot file yang ada di `files`** — buta ke
+  segalanya yang lain (schema DB, creds, nama container, isi file lain). Task lane ini WAJIB
+  self-contained: **create file BARU yang butuh fakta proyek -> `strong-editor`** (boleh `Read`
+  referensi) ATAU embed semua fakta + path file-contoh verbatim ke `change`. Tanpa snapshot,
+  worker mengarang fakta yang tak dilihatnya (nama tabel/creds/container salah) → plausible tapi
+  salah. Jangan tulis "ikuti gaya file X" kalau X tak ada di `files`. Worker = EDIT file existing
+  (punya anchor); author file baru yang butuh domain knowledge = `strong-editor`.
+
+**Write 4 handoff files — this is mandatory, not optional.** The plan markdown is for
+humans (detail, rationale, deploy order). Machine artifacts are split by execution lane.
+Write the complete JSON array to `project-docs/plans/<slug>.tasks.json` (same `<slug>` as the
+plan markdown). This is master task graph across all lanes. `agent-plan-worker` must NOT parse
+the markdown — markdown parsing is fragile. Every field executor needs lives in machine artifacts.
+
+This makes execution **resumable, restart-safe, and parse-free**: `agent-plan-worker` reads
 `<slug>.tasks.json`, claims any item with `status:"pending"` and `blockedBy:[]`, executes
 it, updates `status` to `"done"`, and the rest unblock automatically — so a stalled run
 reloads from the file, never restarts from scratch and never re-parses the doc.
-The plan markdown and `.tasks.json` must agree; **`.tasks.json` is the source of truth for
-execution**.
+The plan markdown and `.tasks.json` must agree; **`.tasks.json` is master source of truth across lanes**.
+
+Then write `project-docs/plans/<slug>.worker.tasks.json` containing **only** items where
+`execution_lane = "agent-plan-worker"`.
+
+Then write `project-docs/plans/<slug>.worker.request.json` with this shape:
+
+```json
+{
+  "mode": "tasks",
+  "project_id": "<project-id>",
+  "repo_root": "<absolute-repo-root>",
+  "tasks_path": "<absolute-path-to-<slug>.worker.tasks.json>",
+  "profile_path": "<absolute-profile-path-if-known>",
+  "run_id": "<slug>",
+  "load_provider_config": true,
+  "apply_writes": false,
+  "output_detail": "compact",
+  "model_step_preview": false,
+  "model_step_mode": "deepseek"
+}
+```
+
+Then write `project-docs/plans/<slug>.strong-editor.manifest.json` containing **only** items where
+`execution_lane = "strong-editor"` OR `execution_lane = "reasonix"` (both lanes share this manifest;
+the fixer routes each item by its `execution_lane` field). This manifest is lane handoff for the
+reasonix-runner / strong editor / opus-coder, not for `agent-plan-worker`.
+
+Profile rule:
+
+- if profile path exact diketahui, tulis `profile_path`
+- kalau tidak, tetap pastikan runtime nanti punya discoverable profile di `<repo_root>/profiles/<project_id>.json`
+- jangan serahkan ambiguity profile ke main agent
+
+Lane rule:
+
+- planner must finish split during planning stage
+- `.worker.request.json` points to `.worker.tasks.json`, never ke master mixed `*.tasks.json`
+- item `strong-editor` or `reasonix` never appears in worker artifacts
+- executor consumes lane-specific artifact directly; post-plan split is not happy-path architecture
+- CLI split utility, if it exists, is repair/debug fallback only
+- lane artifacts must form complete partition of master graph: no duplicate item id across worker/strong-editor, no master item missing from both lane files
+- **a lane file's `blockedBy` must reference ONLY ids present in that SAME lane file.** A worker
+  item with `blockedBy:["T1"]` where T1 lives in the strong-editor manifest makes the worker
+  scheduler abort (`blockedBy unknown task T1`) and poison its run-state. Strip cross-lane deps
+  when writing each lane artifact (drop ids not in the lane, rebase `wave` to the lane's own
+  ordering). Cross-lane ordering is enforced by the MAIN agent running lanes in sequence, not
+  encoded in the worker file. Master `*.tasks.json` keeps full cross-lane `blockedBy`; lane files do not.
+- if lane split or verification ownership is ambiguous, STOP and keep plan not-ready; do not delegate ambiguity to executor
 
 ## Phase 6 — Re-review the breakdown
 
@@ -270,7 +347,12 @@ Write to `project-docs/plans/YYYY-MM-DD-<slug>.md` (today's date from context). 
 - **Date**: <date>  **Source**: conversation <session summary line> | <spec/PRD path>
 - **Risk**: <low/med/high>
 - **Status**: ready for execution
-- **Tasks**: `project-docs/plans/<slug>.tasks.json`
+- **Tasks**: `project-docs/plans/<slug>.tasks.json` (master source of truth across all lanes)
+- **Worker Tasks**: `project-docs/plans/<slug>.worker.tasks.json`
+- **Worker Request**: `project-docs/plans/<slug>.worker.request.json`
+- **Strong-Editor Manifest**: `project-docs/plans/<slug>.strong-editor.manifest.json`
+- **Worker Executor**: `agent-plan-worker -request /abs/path/to/<slug>.worker.request.json`
+- **Lane split**: `agent-plan-worker` untuk task mekanis, `strong-editor` untuk task refactor
 
 ## Requirement
 <what + why, in the user's terms. Scope IN / scope OUT explicit.>
@@ -315,6 +397,7 @@ rollback. If any is missing, the plan is not ready — fix it, don't hand off a 
 ## Phase 8 — Chat summary
 
 Reply in chat (Bahasa Indonesia, terse): the design in 1-2 lines, scope (IN/OUT satu
-baris), number of work items + waves, the plan file path + tasks file path. End with the
-bridge: **"Mau eksekusi? `/fixer <plan-path>`."** (Fixer reads `<slug>.tasks.json` for the
-executable work items.) Then **stop** — do not start editing code.
+baris), number of work items + waves, lane split ringkas, plan file path + master tasks path + worker request path + strong-editor manifest path. End with bridges:
+**"Mau eksekusi lane worker? `agent-plan-worker -request <worker-request-path>`."**
+**"Lane refactor ada di `<strong-editor-manifest-path>`."**
+Then **stop** — do not start editing code.
