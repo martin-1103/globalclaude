@@ -1,0 +1,10 @@
+{
+  "base_url": "https://9router.gass.web.id/v1",
+  "api_key": "sk-74d901bbb7a2fadc-aobsub-c437fbb4",
+  "model": "ag/gemini-3-flash-agent",
+  "query_limit": 50,
+  "max_display_rows": 20,
+  "tool_timeout_seconds": 30,
+  "llm_timeout_seconds": 120,
+  "max_turns": 15
+}

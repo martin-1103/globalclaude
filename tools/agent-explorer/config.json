@@ -1,0 +1,12 @@
+{
+  "base_url": "https://9router.gass.web.id/v1",
+  "api_key": "sk-74d901bbb7a2fadc-aobsub-c437fbb4",
+  "model": "ag/gemini-3-flash-agent",
+  "cbm_binary": "/root/.local/bin/codebase-memory-mcp",
+  "cbm_cache_dir": "/var/cache/codebase-memory-mcp/gass",
+  "claude_context_command": "OPENAI_API_KEY=$(cat /root/.config/claude-context/openai.key) MILVUS_ADDRESS=localhost:19530 /www/server/nodejs/v24.16.0/bin/claude-context-mcp",
+  "tool_timeout_seconds": 20,
+  "max_search_results": 8,
+  "max_snippet_lines": 40,
+  "llm_timeout_seconds": 120
+}

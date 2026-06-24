@@ -1,6 +1,4 @@
-# runtime secrets — NEVER commit (api_key, DB credentials)
-config.json
-*/config.json
+# runtime artifacts — not source code
 */projects/
 */data/
 */context.md
