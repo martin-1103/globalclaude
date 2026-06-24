@@ -1,0 +1,24 @@
+{
+  "plan": "2026-06-22-reasonix-fixer-worker-lane",
+  "lane": "strong-editor",
+  "note": "All strong-editor: new script (reasonix-wrap), new agent def, fixer SKILL.md edit, validation script. All need judgment/new-file authoring. No worker lane.",
+  "items": [
+    "T1",
+    "T2",
+    "T3",
+    "T4"
+  ],
+  "waves": {
+    "1": [
+      "T1"
+    ],
+    "2": [
+      "T2",
+      "T3"
+    ],
+    "3": [
+      "T4"
+    ]
+  },
+  "tasks_ref": "2026-06-22-reasonix-fixer-worker-lane.tasks.json"
+}

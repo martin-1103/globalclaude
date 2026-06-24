@@ -1,0 +1,84 @@
+[
+  {
+    "id": "T1",
+    "wave": 1,
+    "blockedBy": [],
+    "files": [
+      "/usr/local/bin/reasonix-wrap"
+    ],
+    "track": "build",
+    "change": "NEW python3 script (zero deps, executable). Args: <repo> <task-change-text> --files a.go,b.go --verify CMD [--max-steps N] [--steps] [--full]. NO timeout/kill. Flow: (1) git checkpoint HEAD ref for rollback. (2) reasonix run -dir <repo> -metrics <tmp> with change+'only edit these files' constraint; tee stdout to <repo>/.reasonix-runs/<ts>.log (so activity is observable live via the log). (3) run --verify RED->GREEN. (4) soft boundary: git diff --name-only + untracked; path not in --files => out_of_bounds + list. (5) deterministic parse (NO LLM): strip ANSI; count tool calls per name from '  -> NAME'; collect ANOMALY lines only (bash exit!=0/error/fail/retry/blocked/anchor not unique/verdict=block); last non-dim block=answer; read metrics.json. (6) COMPACT summary: header(steps,tok,cache%,cost,walltime)+tool aggregate+anomalies(<=N or none)+files-touched+verify result+answer(trunc)+raw-log path. Summary shows STEP COUNT + last tool call so activity is visible (was it moving). MUST NOT grow linear w steps. --steps:+1line/step. --full:raw. (7) exit maps status 0=done 3=failed 4=out_of_bounds, print STATUS=<x>. NO timeout status \u2014 runs to natural completion.",
+    "verify": "python3 -c \"import ast; ast.parse(open('/usr/local/bin/reasonix-wrap').read())\" && /usr/local/bin/reasonix-wrap --help 2>&1 | grep -q files",
+    "rollback": "rm /usr/local/bin/reasonix-wrap",
+    "risk": "med",
+    "status": "completed",
+    "task_class": "surgical",
+    "execution_lane": "strong-editor",
+    "edit_strategy": "rewrite-block",
+    "requires_live_read": true,
+    "max_patch_scope": "single-file"
+  },
+  {
+    "id": "T2",
+    "wave": 2,
+    "blockedBy": [
+      "T1"
+    ],
+    "files": [
+      "/root/.claude/agents/reasonix-runner.md"
+    ],
+    "track": "build",
+    "change": "NEW agent def. Frontmatter: name reasonix-runner, model haiku, tools Bash,Read (mirror /root/.claude/agents/haiku-bash.md format incl <CCR-SUBAGENT-MODEL> tag). Body: receives task spec (repo,change,files,verify), runs reasonix-wrap <repo> <change> --files <files> --verify <cmd>, relays compact summary + STATUS= line VERBATIM. Discipline like haiku-bash: return DATA not verdict, no interpret, no re-run. Relay out_of_bounds/timeout/failed plainly. Raw verbose stays in reasonix-wrap log (path in summary), subagent does NOT dump it. Purpose: context isolation.",
+    "verify": "test -f /root/.claude/agents/reasonix-runner.md && grep -q 'reasonix-wrap' /root/.claude/agents/reasonix-runner.md && head -1 /root/.claude/agents/reasonix-runner.md | grep -q '^---'",
+    "rollback": "rm /root/.claude/agents/reasonix-runner.md",
+    "risk": "low",
+    "status": "completed",
+    "task_class": "surgical",
+    "execution_lane": "strong-editor",
+    "edit_strategy": "rewrite-block",
+    "requires_live_read": true,
+    "max_patch_scope": "single-file"
+  },
+  {
+    "id": "T3",
+    "wave": 2,
+    "blockedBy": [
+      "T1"
+    ],
+    "files": [
+      "/root/.claude/skills/fixer/SKILL.md"
+    ],
+    "track": "build",
+    "change": "Edit fixer SKILL.md Phase 1b. Add routing: execution_lane:reasonix => step2 spawns reasonix-runner instead of sonnet-editor/opus-coder, passing repo+change+files(boundary)+verify. Parallel: N reasonix items/wave = N reasonix-runner spawns in ONE message (file-disjoint, same rule). Steps 1,3,4,5 (disjoint-check,verify,status write-back,diff-reviewer) UNCHANGED still apply. Caveat note: reasonix broad write_roots /var/pile + only SOFT per-task boundary (reasonix-wrap detects out_of_bounds post-hoc); diff-review+verify gate = safety net before wave advances; treat out_of_bounds as BLOCK. Surgical: add rule+caveat, no full rewrite.",
+    "verify": "grep -q 'reasonix-runner' /root/.claude/skills/fixer/SKILL.md && grep -q 'execution_lane' /root/.claude/skills/fixer/SKILL.md",
+    "rollback": "revert SKILL.md",
+    "risk": "med",
+    "status": "completed",
+    "task_class": "surgical",
+    "execution_lane": "strong-editor",
+    "edit_strategy": "insert-delete-small",
+    "requires_live_read": true,
+    "max_patch_scope": "single-file"
+  },
+  {
+    "id": "T4",
+    "wave": 3,
+    "blockedBy": [
+      "T1"
+    ],
+    "files": [
+      "/tmp/reasonix-wrap-test/run.sh"
+    ],
+    "track": "test",
+    "change": "NEW throwaway validation script in /tmp. Build toy git repo + small Go file. Test reasonix-wrap e2e: (a) in-bounds edit + passing verify -> STATUS=done + compact summary (assert small line count even if steps>10) + summary shows step count/activity. (b) task touching file OUTSIDE --files -> STATUS=out_of_bounds. Assert specific STATUS strings + raw log exists + step count visible in summary. Print PASS/FAIL per case. (NO timeout case \u2014 feature dropped.)",
+    "verify": "bash /tmp/reasonix-wrap-test/run.sh 2>&1 | grep -q PASS",
+    "rollback": "rm -rf /tmp/reasonix-wrap-test",
+    "risk": "low",
+    "status": "completed",
+    "task_class": "surgical",
+    "execution_lane": "strong-editor",
+    "edit_strategy": "rewrite-block",
+    "requires_live_read": true,
+    "max_patch_scope": "single-file"
+  }
+]
