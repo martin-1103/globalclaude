@@ -15,6 +15,10 @@ func runCommand(ctx context.Context, timeoutSeconds int, dir string, name string
 
 	cmd := exec.CommandContext(cctx, name, args...)
 	cmd.Dir = dir
+	// WaitDelay prevents indefinite hang when concurrent subprocesses
+	// leave pipe-copy goroutines blocked (Go issue #23019, #61080).
+	// After WaitDelay expires, stuck pipes are force-closed and Run() returns.
+	cmd.WaitDelay = 2 * time.Second
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

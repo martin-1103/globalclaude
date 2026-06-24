@@ -4,24 +4,36 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"agent-db/internal/config"
 	"agent-db/internal/db"
 	"agent-db/internal/llm"
+	"agent-db/internal/schema"
 )
 
 type Agent struct {
 	cfg    config.Config
 	client *llm.Client
 	tools  *db.Tools
+	schema *schema.Store
 }
 
 func New(cfg config.Config, client *llm.Client, tools *db.Tools) *Agent {
-	return &Agent{cfg: cfg, client: client, tools: tools}
+	a := &Agent{cfg: cfg, client: client, tools: tools}
+	if strings.TrimSpace(cfg.SchemaDir) != "" {
+		store, err := schema.NewStore(cfg.SchemaDir)
+		if err == nil {
+			a.schema = store
+		}
+	}
+	return a
+}
+
+// SchemaStore returns the agent's schema store, or nil if not available.
+func (a *Agent) SchemaStore() *schema.Store {
+	return a.schema
 }
 
 // Step records one turn of the loop for output formatting.
@@ -41,7 +53,7 @@ type Result struct {
 
 func (a *Agent) Run(ctx context.Context, query string) (Result, error) {
 	messages := []llm.Message{
-		{Role: "system", Content: a.systemPrompt()},
+		{Role: "system", Content: a.systemPrompt(query)},
 		{Role: "user", Content: query},
 	}
 
@@ -214,13 +226,11 @@ func extractJSONBlocks(s string) []string {
 	return blocks
 }
 
-// learn inspects a show_tables / describe_table result and appends NEW schema
-// discoveries to the project's context.md. It is silent and best-effort: any
-// failure (no context path, parse error, write error) is ignored so it never
+// learn inspects a show_tables / describe_table result and updates the JSON
+// schema index. Silent and best-effort: failures are ignored so it never
 // disrupts the agent. Results starting with ERROR are skipped.
 func (a *Agent) learn(call db.ToolCall, result string) {
-	path := a.cfg.ContextPath
-	if strings.TrimSpace(path) == "" {
+	if a.schema == nil {
 		return
 	}
 	if strings.HasPrefix(strings.TrimSpace(result), "ERROR") {
@@ -228,109 +238,20 @@ func (a *Agent) learn(call db.ToolCall, result string) {
 	}
 
 	database := a.tools.ResolveDatabase(call.DBType, call.Database)
-	today := time.Now().Format("2006-01-02")
 
-	var entries []string // markdown lines to append
 	switch call.Tool {
 	case "show_tables":
-		for _, name := range parseCells(result, 0) {
-			if !safeName(name) {
-				continue
-			}
-			entries = append(entries, fmt.Sprintf("- `%s.%s` (discovered %s)", database, name, today))
-		}
+		tables := parseCells(result, 0)
+		_ = a.schema.DiscoverDB(database, call.DBType, tables)
+
 	case "describe_table":
 		table := strings.TrimSpace(call.Table)
-		if !safeName(table) {
-			return
-		}
-		var cols []string
 		names := parseCells(result, 0)
-		types := parseCells(result, 1)
-		for i, n := range names {
-			n = strings.TrimSpace(n)
-			if n == "" {
-				continue
-			}
-			typ := ""
-			if i < len(types) {
-				typ = strings.TrimSpace(types[i])
-			}
-			cols = append(cols, fmt.Sprintf("%s(%s)", n, typ))
-		}
-		if len(cols) == 0 {
-			return
-		}
-		entries = append(entries, fmt.Sprintf("- `%s.%s` — <columns: %s> (discovered %s)",
-			database, table, strings.Join(cols, ", "), today))
+		_ = a.schema.UpdateTable(database, call.DBType, table, names)
+
 	default:
 		return
 	}
-	if len(entries) == 0 {
-		return
-	}
-
-	existing, _ := os.ReadFile(path)
-	content := string(existing)
-
-	// For each entry: if an existing line for the same token exists, replace it
-	// (schema may grow new columns). Otherwise append.
-	updated := content
-	var toAppend []string
-	for _, e := range entries {
-		token := extractToken(e)
-		if token == "" {
-			toAppend = append(toAppend, e)
-			continue
-		}
-		// Find existing line containing this token and replace it.
-		lines := strings.Split(updated, "\n")
-		replaced := false
-		for i, line := range lines {
-			if strings.Contains(line, "`"+token+"`") {
-				lines[i] = e
-				replaced = true
-				break
-			}
-		}
-		if replaced {
-			updated = strings.Join(lines, "\n")
-		} else {
-			toAppend = append(toAppend, e)
-		}
-	}
-
-	var b strings.Builder
-	b.WriteString(updated)
-	if len(toAppend) > 0 {
-		if !strings.Contains(updated, "## Discovered Tables") {
-			if updated != "" && !strings.HasSuffix(updated, "\n") {
-				b.WriteString("\n")
-			}
-			b.WriteString("\n## Discovered Tables\n")
-		} else if !strings.HasSuffix(updated, "\n") {
-			b.WriteString("\n")
-		}
-		for _, e := range toAppend {
-			b.WriteString(e)
-			b.WriteString("\n")
-		}
-	}
-	_ = os.WriteFile(path, []byte(b.String()), 0o644)
-}
-
-// extractToken returns the `database.table` value from a discovery line, or "".
-func extractToken(line string) string {
-	i := strings.Index(line, "`")
-	if i < 0 {
-		return ""
-	}
-	rest := line[i+1:]
-	j := strings.Index(rest, "`")
-	if j < 0 {
-		return ""
-	}
-	return rest[:j]
 }
 
 // parseCells extracts the value at column index col from each data row of a
@@ -495,7 +416,7 @@ func trimRows(out string, maxRows int) string {
 	return strings.Join(kept, "\n") + fmt.Sprintf("\n... (%d more rows trimmed)", len(lines)-maxRows)
 }
 
-func (a *Agent) systemPrompt() string {
+func (a *Agent) systemPrompt(query string) string {
 	notes := ""
 	if strings.TrimSpace(a.cfg.Notes) != "" {
 		notes = "\n\nPROJECT NOTES:\n" + a.cfg.Notes
@@ -503,9 +424,12 @@ func (a *Agent) systemPrompt() string {
 
 	avail := a.availableDBs()
 
-	schema := ""
-	if strings.TrimSpace(a.cfg.Context) != "" {
-		schema = "\n\nPROJECT SCHEMA (discovered from prior runs):\n" + strings.TrimSpace(a.cfg.Context)
+	// Inject schema from JSON index with relevance filtering.
+	schemaBlock := ""
+	if a.schema != nil {
+		if s, err := a.schema.InjectRelevant(query); err == nil && s != "" {
+			schemaBlock = s
+		}
 	}
 
 	return fmt.Sprintf(`You are agent-db, a database query agent. Answer the user's question by querying real databases through tools.
@@ -543,7 +467,7 @@ GROUNDING (answer rules):
 - Mark inference explicitly ("inferred:", "assuming:"). Do not present a guess as observed.
 - If a query errors or data is missing, say so loudly — do not fabricate a number.
 - Final answer max 200 words.%s%s`,
-		avail, a.cfg.QueryLimit, a.cfg.MaxTurns, notes, schema)
+		avail, a.cfg.QueryLimit, a.cfg.MaxTurns, notes, schemaBlock)
 }
 
 func (a *Agent) availableDBs() string {

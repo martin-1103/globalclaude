@@ -58,8 +58,32 @@ func New(cfg config.Config) *Client {
 }
 
 // Chat sends the full message history (system + alternating user/assistant)
-// and returns the assistant's next reply. The agentic loop owns the history.
+// and returns the assistant's next reply. Retries on timeout errors.
 func (c *Client) Chat(ctx context.Context, messages []Message) (string, error) {
+	const maxAttempts = 3
+	backoff := []time.Duration{time.Second, 3 * time.Second}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		out, err := c.chatOnce(ctx, messages, attempt)
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+
+		errStr := err.Error()
+		if !strings.Contains(errStr, "timeout") && !strings.Contains(errStr, "deadline exceeded") && !strings.Contains(errStr, "context deadline") {
+			return "", err
+		}
+
+		if attempt < maxAttempts-1 {
+			time.Sleep(backoff[attempt])
+		}
+	}
+	return "", fmt.Errorf("llm timeout after %d attempts: %w", maxAttempts, lastErr)
+}
+
+func (c *Client) chatOnce(ctx context.Context, messages []Message, attempt int) (string, error) {
 	start := time.Now()
 	reqBody := chatRequest{
 		Model:       c.model,

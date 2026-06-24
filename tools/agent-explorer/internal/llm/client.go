@@ -58,6 +58,30 @@ func New(cfg config.Config) *Client {
 }
 
 func (c *Client) Chat(ctx context.Context, systemPrompt string, userPrompt string) (string, error) {
+	const maxAttempts = 3
+	backoff := []time.Duration{time.Second, 3 * time.Second}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		out, err := c.chatOnce(ctx, systemPrompt, userPrompt, attempt)
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+
+		errStr := err.Error()
+		if !strings.Contains(errStr, "timeout") && !strings.Contains(errStr, "deadline exceeded") && !strings.Contains(errStr, "context deadline") {
+			return "", err
+		}
+
+		if attempt < maxAttempts-1 {
+			time.Sleep(backoff[attempt])
+		}
+	}
+	return "", fmt.Errorf("llm timeout after %d attempts: %w", maxAttempts, lastErr)
+}
+
+func (c *Client) chatOnce(ctx context.Context, systemPrompt string, userPrompt string, attempt int) (string, error) {
 	start := time.Now()
 	reqBody := chatRequest{
 		Model: c.model,
@@ -73,7 +97,12 @@ func (c *Client) Chat(ctx context.Context, systemPrompt string, userPrompt strin
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	// Detach from parent context deadline — LLM call gets its own 30s budget
+	// so it cannot consume the parent timeout and starve downstream tools.
+	detached := context.WithoutCancel(ctx)
+	reqCtx, cancel := context.WithTimeout(detached, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("new request: %w", err)
 	}

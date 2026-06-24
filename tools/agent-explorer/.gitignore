@@ -1,0 +1,14 @@
+# Binary
+agent-explorer
+/agent-explorer
+
+# Run data
+data/runs/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

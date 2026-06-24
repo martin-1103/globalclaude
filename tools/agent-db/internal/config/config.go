@@ -33,10 +33,15 @@ type Config struct {
 	Notes       string      `json:"notes"`
 
 	// Runtime-only fields (not serialized): identify the resolved project so the
-	// agent can read/append the project's context.md for self-learning.
+	// agent can read/append schema files for self-learning.
 	Slug        string `json:"-"`
+	SchemaDir   string `json:"-"`
 	ContextPath string `json:"-"`
 	Context     string `json:"-"`
+
+	// ConfirmDestructive (runtime-only, set via --confirm-destructive flag):
+	// when false, Execute rejects destructive SQL/redis ops (read-only mode).
+	ConfirmDestructive bool `json:"-"`
 }
 
 type Containers struct {
@@ -113,6 +118,11 @@ func ContextPath(slug string) string {
 	return filepath.Join(ProjectDir(slug), "context.md")
 }
 
+// SchemaDir returns the per-project schema directory.
+func SchemaDir(slug string) string {
+	return filepath.Join(ProjectDir(slug), "schema")
+}
+
 // Load builds the merged config:
 //  1. read global config (configPath or default)
 //  2. compute slug from projectDir and merge the per-project config.json (project wins)
@@ -140,6 +150,7 @@ func Load(configPath string, projectDir string) (Config, error) {
 	slug := Slug(projectDir)
 	cfg.Slug = slug
 	cfg.ContextPath = ContextPath(slug)
+	cfg.SchemaDir = SchemaDir(slug)
 
 	projPath := ProjectConfigPath(slug)
 	if projData, err := os.ReadFile(projPath); err == nil {

@@ -95,3 +95,39 @@ func TestParallelSlotWorkersBounded(t *testing.T) {
 		t.Fatalf("parallelSlotWorkers(8) = %d, want 3", got)
 	}
 }
+
+func TestCalibrateExactSymbolHighConfidence(t *testing.T) {
+	exp := &Explorer{cfg: config.Config{}}
+	plan := planner.Plan{Intent: "definition", PrimaryTool: "graph"}
+	hits := []tools.Hit{
+		{File: "services/sync-service/internal/backfill/backfill.go", Score: 139, Why: "exact symbol resolve", EvidenceType: "definition"},
+		{File: "services/event-processor-service/internal/clickhouse/flush_retry_publisher.go", Score: 129, Why: "graph symbol search", EvidenceType: "definition"},
+		{File: "services/event-processor-service/internal/clickhouse/flush_retry_publisher.go", Score: 129, Why: "graph symbol search", EvidenceType: "definition"},
+	}
+	result := exp.calibrateConfidenceBands(plan, hits)
+	if len(result) == 0 {
+		t.Fatal("got empty result")
+	}
+	t.Logf("Hit 0: conf=%s why=%q score=%d", result[0].Confidence, result[0].Why, result[0].Score)
+	t.Logf("Hit 1: conf=%s why=%q score=%d", result[1].Confidence, result[1].Why, result[1].Score)
+	t.Logf("Hit 2: conf=%s why=%q score=%d", result[2].Confidence, result[2].Why, result[2].Score)
+	if result[0].Confidence != "high" {
+		t.Errorf("exact symbol match should be HIGH, got %s", result[0].Confidence)
+	}
+	if result[1].Confidence == "high" {
+		t.Errorf("cross-service FP should NOT be high, got %s", result[1].Confidence)
+	}
+}
+
+func TestMajorityServicePicksCorrectService(t *testing.T) {
+	hits := []tools.Hit{
+		{File: "services/sync-service/internal/backfill.go", Score: 139, Why: "exact symbol resolve"},
+		{File: "services/event-processor-service/internal/flush.go", Score: 129, Why: "graph symbol search"},
+		{File: "services/event-processor-service/internal/pub.go", Score: 129, Why: "graph symbol search"},
+	}
+	got := majorityService(hits)
+	if got != "sync-service" {
+		t.Errorf("majorityService should pick sync-service (exact match), got %q", got)
+	}
+	t.Logf("majorityService = %q", got)
+}

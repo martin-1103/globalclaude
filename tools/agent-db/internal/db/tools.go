@@ -41,6 +41,11 @@ type ToolCall struct {
 // back into the conversation. Errors are returned as text (not Go errors) so
 // the agent can see and recover from them, except for unknown tools.
 func (t *Tools) Execute(ctx context.Context, call ToolCall) string {
+	if !t.cfg.ConfirmDestructive {
+		if msg := destructiveGuard(call); msg != "" {
+			return msg
+		}
+	}
 	switch call.Tool {
 	case "query_clickhouse":
 		return t.QueryClickHouse(ctx, call.SQL, call.Database)
@@ -248,6 +253,114 @@ func (t *Tools) run(ctx context.Context, name string, args ...string) string {
 // safeIdent allows only identifiers/qualified names for places where the table
 // name is interpolated directly (DESCRIBE / COUNT). Free-form SQL goes through
 // query_* unchanged — those run as the configured DB user's privileges.
+// sqlDestructiveVerbs are statement-leading SQL verbs blocked in read-only mode.
+var sqlDestructiveVerbs = map[string]bool{
+	"DELETE": true, "UPDATE": true, "DROP": true, "INSERT": true, "TRUNCATE": true,
+	"ALTER": true, "CREATE": true, "GRANT": true, "REVOKE": true, "REPLACE": true,
+	"MERGE": true, "RENAME": true, "SHUTDOWN": true, "KILL": true, "OPTIMIZE": true,
+	"ATTACH": true, "DETACH": true, "LOAD": true,
+}
+
+// redisDestructiveCmds are redis first-word commands blocked in read-only mode
+// (writes, deletes, and control ops). Read commands (GET/KEYS/SCAN/HGETALL/etc)
+// are allowed by not being listed.
+var redisDestructiveCmds = map[string]bool{
+	"DEL": true, "UNLINK": true, "FLUSHALL": true, "FLUSHDB": true,
+	"RENAME": true, "RENAMENX": true, "MOVE": true, "MIGRATE": true,
+	"RESTORE": true, "RESTORE-ASKING": true, "CONFIG": true, "SHUTDOWN": true,
+	"SWAPDB": true, "SCRIPT": true, "SET": true, "SETEX": true, "SETNX": true,
+	"PSETEX": true, "MSET": true, "MSETNX": true, "GETSET": true, "GETDEL": true,
+	"APPEND": true, "SETRANGE": true, "HSET": true, "HMSET": true, "HSETNX": true,
+	"HDEL": true, "HINCRBY": true, "HINCRBYFLOAT": true, "LPUSH": true, "RPUSH": true,
+	"LPUSHX": true, "RPUSHX": true, "LSET": true, "LREM": true, "LPOP": true, "RPOP": true,
+	"LINSERT": true, "LTRIM": true, "RPOPLPUSH": true, "LMOVE": true,
+	"SADD": true, "SREM": true, "SMOVE": true, "SPOP": true, "SINTERSTORE": true,
+	"SUNIONSTORE": true, "SDIFFSTORE": true, "ZADD": true, "ZREM": true,
+	"ZPOPMIN": true, "ZPOPMAX": true, "ZINCRBY": true, "ZREMRANGEBYRANK": true,
+	"ZREMRANGEBYSCORE": true, "ZUNIONSTORE": true, "ZINTERSTORE": true,
+	"INCR": true, "INCRBY": true, "DECR": true, "DECRBY": true, "INCRBYFLOAT": true,
+	"EXPIRE": true, "PEXPIRE": true, "EXPIREAT": true, "PEXPIREAT": true,
+	"PERSIST": true, "SETBIT": true, "BITFIELD": true, "GEOADD": true,
+	"PFADD": true, "XADD": true, "XDEL": true, "XTRIM": true, "BITOP": true,
+}
+
+// destructiveGuard returns a non-empty error message if the call would perform
+// a destructive op while in read-only mode. Returns "" if the call is allowed.
+func destructiveGuard(call ToolCall) string {
+	switch call.Tool {
+	case "query_clickhouse", "query_mysql", "query_postgres":
+		if sqlHasDestructive(call.SQL) {
+			return "ERROR: destructive SQL rejected (read-only mode). To allow DELETE/UPDATE/DROP/INSERT/TRUNCATE/ALTER/CREATE/GRANT/REVOKE/REPLACE/MERGE/RENAME/OPTIMIZE, re-run agent-db with --confirm-destructive."
+		}
+	case "query_redis":
+		first := firstRedisCmd(call.Command)
+		if first != "" && redisDestructiveCmds[first] {
+			return "ERROR: destructive Redis command " + first + " rejected (read-only mode). To allow writes/deletes, re-run agent-db with --confirm-destructive."
+		}
+	}
+	return ""
+}
+
+// sqlHasDestructive reports whether any statement (split on ';') begins with a
+// destructive verb, after stripping leading whitespace, '(' and SQL comments.
+func sqlHasDestructive(sql string) bool {
+	for _, stmt := range strings.Split(sql, ";") {
+		s := stripSQLLead(stmt)
+		if s == "" {
+			continue
+		}
+		if verb := firstToken(s); verb != "" && sqlDestructiveVerbs[verb] {
+			return true
+		}
+	}
+	return false
+}
+
+// stripSQLLead trims leading whitespace, '(' and SQL line/block comments.
+func stripSQLLead(s string) string {
+	s = strings.TrimSpace(s)
+	for {
+		if strings.HasPrefix(s, "--") {
+			if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = strings.TrimSpace(s[i+1:])
+			continue
+			}
+			return ""
+		}
+		if strings.HasPrefix(s, "/*") {
+			if i := strings.Index(s, "*/"); i >= 0 {
+			s = strings.TrimSpace(s[i+2:])
+			continue
+			}
+			return ""
+		}
+		if strings.HasPrefix(s, "(") {
+			s = strings.TrimSpace(s[1:])
+			continue
+		}
+		break
+	}
+	return s
+}
+
+// firstToken returns the uppercased first whitespace-delimited token of s.
+func firstToken(s string) string {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToUpper(fields[0])
+}
+
+// firstRedisCmd returns the uppercased first token of a redis command string.
+func firstRedisCmd(cmd string) string {
+	fields := strings.Fields(strings.TrimSpace(cmd))
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToUpper(fields[0])
+}
+
 func safeIdent(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" {
