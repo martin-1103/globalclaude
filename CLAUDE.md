@@ -86,15 +86,15 @@ Direct Bash is also fine — large output gets auto-sandboxed by the hook.
 | Edit a file, path known | Read + Edit |
 | Shell/build/logs/DB | Bash directly (auto-sandbox) |
 | Large output / parallel | `ctx_batch_execute` |
-| Log query (errors, warnings, container) | `agent-log "question"` |
-| DB query (MySQL / ClickHouse / Redis) | `agent-db --project /path "question"` |
-| Multi-file code explore / symbol unknown | Skill `agent-explorer-main-agent` → `agent-explorer ask --repo /path --query "..." --main-agent --timeout 90` |
+| Log query (errors, warnings, container) | Skill `log-query` — `ctx_execute` curl to VictoriaLogs or `gasslog.sh` directly, no NL sub-agent |
+| DB query (MySQL / ClickHouse / Postgres / Redis) | Skill `db-query` — `ctx_execute` `docker exec` with cached per-project credentials, no NL sub-agent |
+| Multi-file code explore / symbol unknown | `repowise search` or `mcp__claude-context__search_code` for meaning/semantic; `rg`/`ast-grep` for exact/structural |
 
 **Fetch tool priority — don't bypass:**
-- Logs → `agent-log`, not manual Docker exec / curl VictoriaLogs
-- DB → `agent-db`, not manual `docker exec mysql` / `clickhouse-client`
-- Code explore → skill `agent-explorer-main-agent` (fastcontext), not sonnet-explorer / haiku-codebase-memory agent
-- `agent-log` & `agent-db` return **data, not verdicts** — reasoning stays with the main agent; don't ask these tools "why did it error"
+- Logs → skill `log-query`, not manual ad-hoc Docker exec / curl VictoriaLogs without reading the skill first
+- DB → skill `db-query`, not manual `docker exec mysql` / `clickhouse-client` without reading the credential store first
+- Code explore → `repowise search` / `claude-context` MCP for semantic, `codebase-memory MCP` for graph — not a sub-agent NL wrapper
+- `db-query`/`log-query` compose the exact query themselves — main agent reasons directly over raw results, no NL→query translation hop to mistranslate
 
 # Code search
 
@@ -103,7 +103,7 @@ Direct Bash is also fine — large output gets auto-sandboxed by the hook.
 | Exact name/string, 1 pattern | `rg` (ripgrep) |
 | Structural/AST (pattern, callback, def) | `ast-grep --lang <lang> --pattern '...'` |
 | File location already known | `Read` |
-| Multi-file explore / caller-callee / flow unknown | Skill `agent-explorer-main-agent` |
+| Multi-file explore / semantic / meaning unknown | `repowise search` or `mcp__claude-context__search_code` |
 | Dependency & call graph | `codebase-memory MCP` (directly from main) |
 | Analyze a file without entering main context | `ctx_execute_file(path, lang, code)` |
 
