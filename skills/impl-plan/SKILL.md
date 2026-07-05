@@ -33,14 +33,13 @@ execute it safely in parallel without re-deciding anything.
   - **agent-db CLI** → `Bash("agent-db '<question>'")` — schema shape, row counts, cross-table queries, multi-step DB investigation (schema discovery, iterative filtering, cross-table correlation).
   - **agent-log CLI** → `Bash("agent-log '<question>'")` — runtime log queries, confirm runtime facts from VictoriaLogs/docker container logs.
   - **codebase-memory MCP** → `mcp__codebase-memory-mcp__search_graph` / `trace_path` / `get_code_snippet` / `query_graph` — trace_path, who-calls-X, impact, find code by symbol. **Always pass project `www-wwwroot-gass-be`.** Call DIRECTLY from main agent, NOT a subagent.
-  - **agent-explorer CLI** → `Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")` — code/symbol/pattern discovery; returns raw ranked `file:line` citations for YOU to read and reason over. (`--main-agent` wajib — tanpanya output verbose, parsing gagal.)
+  - **agent-explorer CLI** → `Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")` — code/symbol/pattern discovery; returns raw ranked `file:line` citations for YOU to read and reason over. (`--main-agent` is mandatory — without it the output is verbose and parsing fails.)
 
   **Subagents (spawn):**
   - `sonnet-explorer` — read project-docs (PRD/spec, ADRs, glossary, pitfalls) + a few bounded code reads, return excerpts+citations; also read the spec/PRD file if one was passed.
   - `haiku-research` — Tavily web research: best practice, common pitfalls, latest docs.
-  - `haiku-bash` — only if you must confirm a runtime fact not answerable via agent-log.
   - `codex:codex-rescue` — adversarial review of the chosen design (gated by risk).
-- **Haiku FETCHES, you DECIDE.** Subagents pull raw signal (snippets, call edges, doc
+- **Fetchers gather, you DECIDE.** Subagents pull raw signal (snippets, call edges, doc
   quotes, schema/row counts) verbatim. They do NOT pick the design or judge tradeoffs.
   YOU do all the deciding. A subagent that recommends an approach is doing your job at
   lower quality — keep the line sharp.
@@ -255,14 +254,14 @@ Routing rules the breakdown must respect (3 lanes; `reasonix` is the default for
   sonnet-editor/opus-coder (which can read freely).
 - **`agent-plan-worker` = DEPRECATED (2026-06-22).** Do NOT route new tasks here. The lane still
   exists only for back-compat with older plans. New plans route editable work to `reasonix`.
-- jangan lempar ambiguity lane ke executor; planner harus pilih lane.
-- **`agent-plan-worker` cuma melihat `change` + snapshot file yang ada di `files`** — buta ke
-  segalanya yang lain (schema DB, creds, nama container, isi file lain). Task lane ini WAJIB
-  self-contained: **create file BARU yang butuh fakta proyek -> `strong-editor`** (boleh `Read`
-  referensi) ATAU embed semua fakta + path file-contoh verbatim ke `change`. Tanpa snapshot,
-  worker mengarang fakta yang tak dilihatnya (nama tabel/creds/container salah) → plausible tapi
-  salah. Jangan tulis "ikuti gaya file X" kalau X tak ada di `files`. Worker = EDIT file existing
-  (punya anchor); author file baru yang butuh domain knowledge = `strong-editor`.
+- don't push lane ambiguity to the executor; the planner must pick the lane.
+- **`agent-plan-worker` only sees `change` + the file snapshot present in `files`** — it is blind to
+  everything else (DB schema, creds, container names, other files' contents). This lane's task MUST be
+  self-contained: **authoring a NEW file that needs project facts -> `strong-editor`** (it may `Read`
+  references) OR embed all facts + verbatim example file paths into `change`. Without a snapshot,
+  the worker invents facts it hasn't seen (wrong table names/creds/container) → plausible but
+  wrong. Don't write "follow the style of file X" if X isn't in `files`. Worker = EDIT an existing file
+  (has an anchor); authoring a new file that needs domain knowledge = `strong-editor`.
 
 **Write 4 handoff files — this is mandatory, not optional.** The plan markdown is for
 humans (detail, rationale, deploy order). Machine artifacts are split by execution lane.
@@ -304,9 +303,9 @@ reasonix-runner / strong editor / opus-coder, not for `agent-plan-worker`.
 
 Profile rule:
 
-- if profile path exact diketahui, tulis `profile_path`
-- kalau tidak, tetap pastikan runtime nanti punya discoverable profile di `<repo_root>/profiles/<project_id>.json`
-- jangan serahkan ambiguity profile ke main agent
+- if the exact profile path is known, write `profile_path`
+- otherwise, still make sure the runtime later has a discoverable profile at `<repo_root>/profiles/<project_id>.json`
+- don't hand off profile ambiguity to the main agent
 
 Lane rule:
 
@@ -352,7 +351,7 @@ Write to `project-docs/plans/YYYY-MM-DD-<slug>.md` (today's date from context). 
 - **Worker Request**: `project-docs/plans/<slug>.worker.request.json`
 - **Strong-Editor Manifest**: `project-docs/plans/<slug>.strong-editor.manifest.json`
 - **Worker Executor**: `agent-plan-worker -request /abs/path/to/<slug>.worker.request.json`
-- **Lane split**: `agent-plan-worker` untuk task mekanis, `strong-editor` untuk task refactor
+- **Lane split**: `agent-plan-worker` for mechanical tasks, `strong-editor` for refactor tasks
 
 ## Requirement
 <what + why, in the user's terms. Scope IN / scope OUT explicit.>
@@ -396,8 +395,8 @@ rollback. If any is missing, the plan is not ready — fix it, don't hand off a 
 
 ## Phase 8 — Chat summary
 
-Reply in chat (Bahasa Indonesia, terse): the design in 1-2 lines, scope (IN/OUT satu
-baris), number of work items + waves, lane split ringkas, plan file path + master tasks path + worker request path + strong-editor manifest path. End with bridges:
+Reply in chat (terse): the design in 1-2 lines, scope (IN/OUT in one
+line), number of work items + waves, lane split summary, plan file path + master tasks path + worker request path + strong-editor manifest path. End with bridges:
 **"Mau eksekusi lane worker? `agent-plan-worker -request <worker-request-path>`."**
 **"Lane refactor ada di `<strong-editor-manifest-path>`."**
 Then **stop** — do not start editing code.

@@ -29,12 +29,12 @@ Use `agent-explorer` as retrieval engine, not final thinker. Goal: return short,
 agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --timeout 90
 ```
 
-`$REPO` HARUS absolute path (mis. `/www/wwwroot/gass/be`), BUKAN slug — slug bikin `chdir: no such file or directory`.
+`$REPO` MUST be an absolute path (e.g. `/www/wwwroot/gass/be`), NOT a slug — a slug causes `chdir: no such file or directory`.
 
-`--main-agent` WAJIB — tanpanya output verbose (human-readable default), field `gaps` dan
-`recommended_action` tidak ada, contract parsing tidak reliable.
+`--main-agent` IS REQUIRED — without it the output is verbose (human-readable default), the `gaps` and
+`recommended_action` fields are absent, and contract parsing is not reliable.
 
-Jangan pakai `--agent-mode` — itu format berbeda (`retrieval_pack`, tanpa `gaps`/`recommended_action`).
+Do not use `--agent-mode` — that's a different format (`retrieval_pack`, without `gaps`/`recommended_action`).
 
 If binary not in `PATH`, use absolute path:
 
@@ -46,18 +46,18 @@ If binary not in `PATH`, use absolute path:
 
 Header: `retrieval_contract`
 
-Fields (satu baris per field):
+Fields (one line per field):
 - `status=grounded|weak_evidence|abstain`
 - `intent=...`
 - `question_class=literal|lookup|behavior|multi-hop|trace`
 - `confidence=high|medium|low|none`
 - `primary_evidence`, `supporting_evidence`, `trace_evidence` (sections hits)
-- `gaps=...` — apa yang tidak ditemukan
-- `recommended_action=reason|re-retrieve` — sinyal eksplisit dari retrieval engine
+- `gaps=...` — what was not found
+- `recommended_action=reason|re-retrieve` — explicit signal from the retrieval engine
 
-Diakhiri `<final_answer>` block dengan citations `file:line [symbol]`.
+Ends with a `<final_answer>` block with citations `file:line [symbol]`.
 
-Jangan parse `retrieval_pack` header — itu output `--agent-mode` (flag berbeda, field berbeda).
+Do not parse the `retrieval_pack` header — that's the output of `--agent-mode` (different flag, different fields).
 
 ## Operating Rules
 
@@ -69,15 +69,15 @@ Jangan parse `retrieval_pack` header — itu output `--agent-mode` (flag berbeda
    - If `status=weak_evidence` or `recommended_action=re-retrieve`, do not overclaim.
 
 3. Keep context small.
-   Prefer `--citation-only` untuk output ringkas.
-   Use `--json` kalau butuh parsing terstruktur.
+   Prefer `--citation-only` for a compact output.
+   Use `--json` if structured parsing is needed.
 
-4. Escalate only when needed — protokol wajib, jangan skip.
-   If first retrieval `weak_evidence` or `abstain`:
-   - WAJIB retry sekali dengan query yang lebih sharp/spesifik (symbol name eksak, bukan konsep)
-   - Kalau retry kedua masih weak → BARU fallback ke tool lain
+4. Escalate only when needed — mandatory protocol, don't skip.
+   If first retrieval is `weak_evidence` or `abstain`:
+   - MUST retry once with a sharper/more specific query (exact symbol name, not a concept)
+   - If the second retry is still weak → THEN fall back to another tool
    - Fallback order: codebase-memory MCP `trace_path`/`search_graph` (caller/callee, exact symbol) → rg/grep (literal string)
-   - JANGAN langsung abandon ke MCP setelah hit pertama weak — retry dulu.
+   - DO NOT jump straight to MCP after the first weak hit — retry first.
 
 5. Preserve evidence boundaries.
    Retrieval engine finds code evidence.
@@ -116,7 +116,7 @@ Machine-readable (structured parsing):
 agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --json --timeout 90
 ```
 
-Citation-only (ringkas):
+Citation-only (compact):
 ```bash
 agent-explorer ask --repo "$REPO" --query "$QUERY" --main-agent --citation-only --timeout 90
 ```

@@ -1,6 +1,6 @@
 ---
 name: fix-plan
-description: Turn a confirmed error/incident into executor-ready fix plan, then hand off to agent-plan-worker — research, decide approach, break it into parallel-safe work items. Does NOT touch code. Use when user says "plan the fix", "rencanakan fix", "rencana perbaikan", "bikin plan fix", "/fix-plan", "rancang perbaikan error", "abis investigate mau benerin", "mau benerin error ini gimana", after an investigation produces an incident report, or when handed an incident file to design a fix for.
+description: Turn a confirmed error/incident into executor-ready fix plan, then hand off to agent-plan-worker — research, decide approach, break it into parallel-safe work items. Does NOT touch code. Use when user says "plan the fix", "plan the fix", "fix plan", "make a fix plan", "/fix-plan", "design an error fix", "just investigated, want to fix it", "how do I fix this error", after an investigation produces an incident report, or when handed an incident file to design a fix for.
 when_to_use: a confirmed/suspected incident or error report exists and the user wants a concrete, reviewed, parallel-safe fix plan before any code is written — the bridge between /investigate and agent-plan-worker execution
 ---
 
@@ -34,12 +34,11 @@ execute it safely in parallel without re-deciding anything.
     correlation, row count, aggregate): `Bash("agent-db '<question>'")`. Handles schema
     discovery + multi-step internally — one call regardless of complexity.
   - **agent-log CLI** — re-confirm a runtime fact from logs: `Bash("agent-log '<question>'")`.
-  - **agent-explorer CLI** — code/symbol/pattern discovery: `Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")` — returns raw ranked `file:line` citations for YOU to read and reason over. (`--main-agent` wajib — tanpanya output verbose, parsing gagal.)
+  - **agent-explorer CLI** — code/symbol/pattern discovery: `Bash("agent-explorer ask --repo <repo> --query '<q>' --main-agent")` — returns raw ranked `file:line` citations for YOU to read and reason over. (`--main-agent` is mandatory — without it the output is verbose and parsing fails.)
 
   **Subagents (spawn):**
   - `sonnet-explorer` — read project-docs (PRD/spec, ADRs, glossary, pitfalls) + a few bounded code reads, return excerpts+citations.
   - `haiku-research` — Tavily web research: best practice, common pitfalls, latest docs.
-  - `haiku-bash` — only if you must run a shell command that doesn't fit the CLIs above.
   - `codex:codex-rescue` — adversarial review of the chosen approach (gated by risk).
 - **Fetchers gather, you DECIDE.** Direct CLI/MCP calls and subagents pull raw signal
   (snippets, call edges, doc quotes, row counts) verbatim. They do NOT pick the approach
@@ -235,17 +234,17 @@ Routing rules the breakdown must respect (3 lanes; `reasonix` is the default for
   sonnet-editor/opus-coder (which can read freely).
 - **`agent-plan-worker` = DEPRECATED (2026-06-22).** Do NOT route new tasks here. The lane still
   exists only for back-compat with older plans. New plans route editable work to `reasonix`.
-- jangan lempar ambiguity lane ke executor; planner harus pilih lane.
-- **`agent-plan-worker` cuma melihat `change` + snapshot file yang ada di `files`** — buta ke
-  segalanya yang lain (schema DB, creds, nama container, isi file lain). Task lane ini WAJIB
-  self-contained terhadap blind-spot itu:
-  - **Create file BARU** (tak ada snapshot) yang butuh fakta proyek -> `strong-editor` (boleh
-    `Read` referensi), ATAU embed semua fakta + path file-contoh verbatim ke `change`. Worker
-    tanpa snapshot akan mengarang fakta yang tak dilihatnya (nama tabel/creds/container salah)
-    → plausible tapi salah → verify gagal.
-  - Jangan tulis "ikuti gaya file X" di `change` kalau X tidak ada di `files` — worker tak bisa
-    membacanya. Kutip fakta yang dibutuhkan, atau pindah ke `strong-editor`.
-  - Aturan ringkas: worker = EDIT file existing (punya anchor). Author file baru yang butuh
+- Don't throw an ambiguous lane at the executor; the planner must pick the lane.
+- **`agent-plan-worker` only sees the `change` field + the file snapshot listed in `files`** — it is
+  blind to everything else (DB schema, creds, container names, contents of other files). This task
+  lane MUST be self-contained against that blind spot:
+  - Creating a **NEW file** (no snapshot exists) that needs project facts -> route to `strong-editor`
+    (which may `Read` references), OR embed all the facts + verbatim example file paths into `change`.
+    A worker without a snapshot will invent facts it never saw (wrong table names/creds/container) →
+    plausible but wrong → verify fails.
+  - Don't write "follow the style of file X" in `change` if X isn't in `files` — the worker can't
+    read it. Quote the needed facts, or move the task to `strong-editor`.
+  - Rule of thumb: worker = EDIT an existing file (has an anchor). Authoring a new file that needs
     domain knowledge = `strong-editor`.
 
 Then **write 4 machine handoff files — this is mandatory, not optional.** The plan markdown
@@ -299,9 +298,9 @@ hand off.
 
 Profile rule:
 
-- if profile path exact diketahui, tulis `profile_path`
-- kalau tidak, tetap pastikan runtime nanti punya discoverable profile di `<repo_root>/profiles/<project_id>.json`
-- jangan serahkan ambiguity profile ke main agent
+- if the exact profile path is known, write `profile_path`
+- if not, still make sure the runtime later has a discoverable profile at `<repo_root>/profiles/<project_id>.json`
+- don't hand profile ambiguity off to the main agent
 
 Lane rule:
 
@@ -345,7 +344,7 @@ Write to `project-docs/plans/YYYY-MM-DD-<slug>.md` (today's date from context). 
 - **Worker Request**: `project-docs/plans/<slug>.worker.request.json`
 - **Strong-Editor Manifest**: `project-docs/plans/<slug>.strong-editor.manifest.json`
 - **Worker Executor**: `agent-plan-worker -request /abs/path/to/<slug>.worker.request.json`
-- **Lane split**: `agent-plan-worker` untuk task mekanis, `strong-editor` untuk task refactor
+- **Lane split**: `agent-plan-worker` for mechanical tasks, `strong-editor` for refactor tasks
 - **Status**: ready for execution
 
 ## Root cause (from incident)
@@ -383,8 +382,8 @@ rollback. If any is missing, the plan is not ready — fix it, don't hand off a 
 
 ## Phase 8 — Chat summary
 
-Reply in chat (Bahasa Indonesia, terse): approach in 1-2 lines, fix level
-(hotfix/root/both), number of work items + waves, lane split ringkas, plan file path + master tasks path + worker request path + strong-editor manifest path. End with bridges:
+Reply in chat (terse): approach in 1-2 lines, fix level
+(hotfix/root/both), number of work items + waves, brief lane split, plan file path + master tasks path + worker request path + strong-editor manifest path. End with bridges:
 **"Mau eksekusi lane worker? `agent-plan-worker -request <worker-request-path>`."**
 **"Lane refactor ada di `<strong-editor-manifest-path>`."**
 Then **stop** — do not start editing code.
